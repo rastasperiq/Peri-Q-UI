@@ -1,2 +1,4 @@
 [functions.order-push]
-verify_jwt = true
+# Off: the project signs sessions with ECC keys, so the legacy-secret gateway
+# check would reject real app sessions. The function checks callers itself.
+verify_jwt = false
