@@ -63,8 +63,10 @@ Deno.serve(async (request) => {
     // The gateway may pass the key through or swap it for a service_role JWT;
     // verify_jwt = true means that JWT's signature is already checked.
     const bearer = authorization.slice("Bearer ".length).trim();
-    const isServer = await sameSecret(bearer, serviceRoleKey) ||
-      jwtRole(bearer) === "service_role";
+    // Only the exact server key counts as the server. Gateway JWT checks are
+    // off on this project (it signs sessions with ECC keys), so an unverified
+    // token claiming role=service_role must not be trusted.
+    const isServer = await sameSecret(bearer, serviceRoleKey);
     let user: { id: string } | null = null;
     if (!isServer) {
       const { data, error: userError } = await userClient.auth.getUser();
