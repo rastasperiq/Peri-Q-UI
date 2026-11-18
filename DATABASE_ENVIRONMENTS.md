@@ -14,8 +14,10 @@ nothing is ever copied from TEST into LIVE.
 | Data | Real customers, orders and payments | Demo accounts and demo orders only |
 | Indicators | Green "LIVE · PRODUCTION" badge in the owner dashboard | Orange TEST MODE banner everywhere, TEST tags on payment screens |
 
-TEST project ref: `____________________` (fill in when the project exists; it is
-a public identifier, not a secret).
+TEST project: "Peri Q TEST", ref `dgrudenflbdbddtcnbeg`, Central EU (Frankfurt),
+organisation RastasperiQ (public identifiers, not secrets). Staging Vercel
+project: `peri-q-ui-staging` (team RastasperiQ), production branch `staging`.
+First built with `tools/environments/setup-test.ps1`.
 
 Never write keys, passwords or connection strings in this file or anywhere in
 Git. They live only in Vercel, in Supabase, in your password manager, or for
@@ -186,9 +188,8 @@ Its safety rules (unit-tested in `guard.test.mjs`, run with `node --test guard.t
    the DNS record to add at the domain registrar). Optionally protect it with
    Vercel Deployment Protection.
 6. **Yoco (TEST keys):** register the TEST webhook with
-   `website/scripts/register-yoco-webhook.ps1` against
-   `https://staging.rastasperiq.co.za/api/yoco/webhook/`, entering the **test**
-   secret key. Save the shown `whsec_…` as `YOCO_WEBHOOK_SECRET` in the TEST
+   `website/scripts/register-yoco-webhook.ps1 -WebhookUrl https://staging.rastasperiq.co.za/api/yoco/webhook/ -Name rastasperiq-staging`,
+   entering the **test** secret key (the script refuses a live key for staging). Save the shown `whsec_…` as `YOCO_WEBHOOK_SECRET` in the TEST
    Vercel project only. Redeploy.
 7. **Check:** `https://staging.rastasperiq.co.za/api/yoco/checkout/` returns
    `"mode":"test"`; the orange banner shows; the owner dashboard (signed in as

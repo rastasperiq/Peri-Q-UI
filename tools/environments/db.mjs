@@ -295,8 +295,8 @@ async function createDemoUser(client, user, password) {
   const id = rows[0].id;
   await client.query(
     `insert into auth.identities (id, user_id, provider_id, provider, identity_data, last_sign_in_at, created_at, updated_at)
-     values (gen_random_uuid(), $1, $1::text, 'email',
-       jsonb_build_object('sub', $1::text, 'email', $2::text, 'email_verified', true), now(), now(), now())`,
+     values (gen_random_uuid(), $1::uuid, $1::uuid::text, 'email',
+       jsonb_build_object('sub', $1::uuid::text, 'email', $2::text, 'email_verified', true), now(), now(), now())`,
     [id, user.email],
   );
   return id;
