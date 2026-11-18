@@ -1,6 +1,7 @@
 import { after, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { readYocoEnv, verifyYocoWebhook } from "@/lib/yoco";
+import { environmentBlock } from "@/lib/environment-guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,6 +30,9 @@ export async function POST(req: Request) {
     secret: env.webhookSecret,
   });
   if (!verification.ok) return NextResponse.json({ error: "Invalid signature." }, { status: 401 });
+  // A 503 makes Yoco retry later instead of writing to the wrong environment.
+  const blocked = await environmentBlock();
+  if (blocked) return blocked;
 
   let event: Record<string, unknown>;
   try {

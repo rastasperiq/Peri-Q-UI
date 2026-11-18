@@ -26,6 +26,15 @@ vi.mock("@/lib/supabase", () => ({
     },
   }),
 }));
+// The environment guard has its own tests (environment.test.tsx).
+const envGuard = vi.hoisted(() => ({ blocked: false }));
+vi.mock("@/lib/environment-guard", async () => {
+  const { NextResponse } = await import("next/server");
+  return {
+    environmentBlock: async () =>
+      envGuard.blocked ? NextResponse.json({ error: "unavailable", code: "environment_mismatch" }, { status: 503 }) : null,
+  };
+});
 import { POST } from "../app/api/delivery/quote/route";
 
 function quoteRow(km: number, fee: number, extra: Record<string, unknown> = {}) {
@@ -48,7 +57,20 @@ beforeEach(() => {
   db.user = { id: "user-a" };
   db.settings = { data: { delivery_available: true, restaurant_address: "28 King Edward Rd, Bloemfontein, Free State 9301, South Africa" }, error: null };
   process.env.GOOGLE_ROUTES_API_KEY = "test-routes-key";
+  envGuard.blocked = false;
   vi.unstubAllGlobals();
+});
+
+describe("environment guard on delivery quotes", () => {
+  it("refuses quotes for the wrong environment before calling Google or the database", async () => {
+    envGuard.blocked = true;
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await POST(request("12 Test Street, Bloemfontein"));
+    expect(response.status).toBe(503);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(db.calls).toHaveLength(0);
+  });
 });
 
 describe("delivery helpers", () => {

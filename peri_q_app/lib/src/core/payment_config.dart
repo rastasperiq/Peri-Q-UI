@@ -17,6 +17,16 @@ Uri? deliveryQuoteUri({String? override}) {
   return _publicHttpsEndpoint(override ?? configured);
 }
 
+/// Admin-only, non-secret environment details (TEST/LIVE, database, payment
+/// mode). Point a TEST build at the staging site with this define.
+Uri? environmentStatusUri({String? override}) {
+  const configured = String.fromEnvironment(
+    'ENVIRONMENT_STATUS_URL',
+    defaultValue: 'https://rastasperiq.co.za/api/environment/',
+  );
+  return _publicHttpsEndpoint(override ?? configured);
+}
+
 Uri? _publicHttpsEndpoint(String value) {
   final uri = Uri.tryParse(value.trim());
   if (uri == null ||

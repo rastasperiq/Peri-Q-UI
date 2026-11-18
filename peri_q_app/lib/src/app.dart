@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'core/app_controller.dart';
+import 'core/app_environment.dart';
 import 'core/auth_deep_links.dart';
 import 'core/payment_session.dart';
 import 'core/app_theme.dart';
@@ -21,6 +22,7 @@ import 'screens/splash_screen.dart';
 import 'screens/reset_password_screen.dart';
 import 'screens/secure_payment_screen.dart';
 import 'screens/supabase_config_missing_screen.dart';
+import 'widgets/environment_indicators.dart';
 
 class PeriQApp extends StatefulWidget {
   const PeriQApp({
@@ -53,6 +55,8 @@ class _PeriQAppState extends State<PeriQApp> {
     }
 
     final client = Supabase.instance.client;
+    // TEST/LIVE comes from the connected database's own marker.
+    unawaited(AppEnvironmentService.instance.loadMarker(client));
     controller = AppController(
       authRepository: SupabaseAuthRepository(client: client),
       menuRepository: SupabaseMenuRepository(client: client),
@@ -236,7 +240,7 @@ class _PeriQAppState extends State<PeriQApp> {
         systemNavigationBarIconBrightness: iconBrightness,
         systemNavigationBarContrastEnforced: false,
       ),
-      child: child ?? const SizedBox.shrink(),
+      child: TestModeBanner(child: child ?? const SizedBox.shrink()),
     );
   }
 }

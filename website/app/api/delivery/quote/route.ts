@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServiceClient, readServerSupabaseConfig } from "@/lib/supabase";
+import { environmentBlock } from "@/lib/environment-guard";
 import { allowRequest, clientIp, DELIVERY_QUOTE_LIMITS, ipBucket } from "@/lib/rate-limit";
 import { computeDrivingRoute, quoteFromRow, routingDestination, type DeliveryQuoteError } from "@/lib/delivery";
 
@@ -23,6 +24,8 @@ export async function POST(req: Request) {
   if (!readServerSupabaseConfig()) {
     return fail(503, { error: "Delivery pricing is temporarily unavailable. Please try again later.", code: "routing_not_configured" });
   }
+  const blocked = await environmentBlock();
+  if (blocked) return blocked;
   let body: unknown;
   try {
     body = await req.json();

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { TestPaymentNotice } from "@/components/environment-banner";
 import CheckoutClient from "./checkout-client";
 
 export const metadata: Metadata = {
@@ -8,6 +9,11 @@ export const metadata: Metadata = {
 };
 
 export default function CheckoutPage() {
-  return <CheckoutClient />;
+  return (
+    <>
+      <TestPaymentNotice />
+      <CheckoutClient />
+    </>
+  );
 }
 

@@ -11,7 +11,8 @@
 supabase/.env*
 firebase-service-account*.json
 *service-account-key*.json
-/release-config.json
+/release-config*.json
+!/release-config*.example.json
 android/key.properties
 android/app/*.jks
 android/app/*.keystore

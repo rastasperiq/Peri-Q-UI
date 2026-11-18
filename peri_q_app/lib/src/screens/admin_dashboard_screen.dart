@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/app_controller.dart';
+import '../core/app_environment.dart';
 import '../core/app_theme.dart';
 import '../models/menu_item.dart';
 import '../models/order.dart';
 import '../widgets/app_image.dart';
+import '../widgets/environment_indicators.dart';
 import '../widgets/admin_order_fulfilment_panel.dart';
 import '../widgets/order_status_chip.dart';
 import 'admin_app_settings_screen.dart';
@@ -174,7 +177,16 @@ class AdminDashboardScreen extends StatelessWidget {
         }
 
         return Scaffold(
-          appBar: AppBar(title: const Text('Owner Dashboard')),
+          appBar: AppBar(
+            title: const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('Owner Dashboard'),
+                SizedBox(width: 10),
+                EnvironmentBadge(),
+              ],
+            ),
+          ),
           floatingActionButton: FloatingActionButton.extended(
             onPressed: () => _openMenuEditor(context),
             icon: const Icon(Icons.add),
@@ -184,6 +196,12 @@ class AdminDashboardScreen extends StatelessWidget {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(20, 20, 20, 110),
               children: [
+                EnvironmentStatusCard(
+                  load: () => AppEnvironmentService.instance.fetchAdminStatus(
+                    Supabase.instance.client,
+                  ),
+                ),
+                const SizedBox(height: 20),
                 Container(
                   padding: const EdgeInsets.all(18),
                   decoration: BoxDecoration(

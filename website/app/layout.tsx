@@ -1,8 +1,10 @@
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
+import { EnvironmentBanner } from "@/components/environment-banner";
 import { MobileCartBar } from "@/components/mobile-cart-bar";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
+import { currentEnvironment } from "@/lib/environment";
 import { siteConfig } from "@/lib/site";
 import { CartProvider } from "@/lib/cart";
 import { CustomerAuthProvider } from "@/lib/customer-auth";
@@ -26,6 +28,8 @@ export const metadata: Metadata = {
   },
   description: siteConfig.description,
   applicationName: siteConfig.name,
+  // The TEST site must never appear in search results.
+  ...(currentEnvironment() === "test" ? { robots: { index: false, follow: false } } : {}),
   alternates: { canonical: "/" },
   manifest: "/site.webmanifest",
   icons: {
@@ -62,6 +66,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <a href="#main-content" className="skip-link">
           Skip to content
         </a>
+        <EnvironmentBanner />
         <CustomerAuthProvider><CartProvider>
           <SiteHeader />
           {children}

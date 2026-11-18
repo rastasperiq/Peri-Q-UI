@@ -37,6 +37,17 @@ vi.mock("@/lib/supabase", () => ({
     },
   }),
 }));
+// The environment guard has its own tests (environment.test.tsx). Here it is
+// "safe" unless a test sets envGuard.blocked.
+const envGuard = vi.hoisted(() => ({ blocked: false }));
+vi.mock("@/lib/environment-guard", async () => {
+  const { NextResponse } = await import("next/server");
+  return {
+    environmentBlock: async () =>
+      envGuard.blocked ? NextResponse.json({ error: "unavailable", code: "environment_mismatch" }, { status: 503 }) : null,
+    checkEnvironment: async () => ({ ok: !envGuard.blocked }),
+  };
+});
 const secret = `whsec_${Buffer.from("test-secret-for-verification").toString("base64")}`;
 const event = { id: "evt-1", type: "payment.succeeded", payload: { id: "pay-1", amount: 12500, currency: "ZAR", mode: "test", metadata: { checkoutId: "ch-1" } } };
 const order = { id: "order-1", user_id: "user-a", payment_method: "yoco", payment_status: "pending", total_price: 125, payment_amount_cents: 12500, yoco_mode: "test", yoco_checkout_id: "ch-1", paid_at: null };
@@ -49,8 +60,31 @@ function signedRequest(value: object = event, timestamp = String(Math.floor(Date
 beforeEach(() => {
   vi.unstubAllGlobals();
   db.results = []; db.rpcResults = {}; db.calls = []; db.userId = "user-a";
-  scheduled.tasks = []; scheduled.invokeError = null;
+  scheduled.tasks = []; scheduled.invokeError = null; envGuard.blocked = false;
   vi.stubEnv("YOCO_SECRET_KEY", "sk_test_example"); vi.stubEnv("YOCO_WEBHOOK_SECRET", secret);
+});
+
+describe("Environment guard on payment routes", () => {
+  it("a signed webhook for the wrong environment is refused before any database write", async () => {
+    envGuard.blocked = true;
+    const response = await webhook(signedRequest());
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ code: "environment_mismatch" });
+    expect(db.calls).toHaveLength(0);
+  });
+  it("checkout is refused before reading the order or calling Yoco", async () => {
+    envGuard.blocked = true;
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const response = await checkout(new Request("https://example.com/api/yoco/checkout", { method: "POST", body: JSON.stringify({ orderId: "order-1" }), headers: { authorization: "Bearer tok" } }));
+    expect(response.status).toBe(503);
+    expect(db.calls).toHaveLength(0);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+  it("card payments report unavailable while the environment is wrong", async () => {
+    envGuard.blocked = true;
+    expect(await (await paymentReadiness()).json()).toEqual({ available: false });
+  });
 });
 
 describe("Production webhook verification", () => {

@@ -1,0 +1,8 @@
+{
+  "APP_ENVIRONMENT": "test",
+  "SUPABASE_URL": "https://YOUR_TEST_PROJECT_REF.supabase.co",
+  "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_YOUR_TEST_PROJECT_KEY",
+  "CARD_CHECKOUT_URL": "https://staging.rastasperiq.co.za/api/yoco/checkout/",
+  "DELIVERY_QUOTE_URL": "https://staging.rastasperiq.co.za/api/delivery/quote/",
+  "ENVIRONMENT_STATUS_URL": "https://staging.rastasperiq.co.za/api/environment/"
+}

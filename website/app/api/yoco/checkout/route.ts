@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createServiceClient, readServerSupabaseConfig } from "@/lib/supabase";
 import { getSiteUrl, readYocoEnv } from "@/lib/yoco";
 import { allowRequest, CHECKOUT_LIMITS, clientIp, ipBucket } from "@/lib/rate-limit";
+import { checkEnvironment, environmentBlock } from "@/lib/environment-guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,7 +28,7 @@ export async function GET() {
         svc.from("payments").select("id").limit(0),
         svc.from("payment_refunds").select("id").limit(0),
       ]);
-      available = !orders.error && !payments.error && !refunds.error;
+      available = !orders.error && !payments.error && !refunds.error && (await checkEnvironment()).ok;
     } catch {
       // Missing configuration or a database outage must fail closed.
     }
@@ -56,6 +57,9 @@ export async function POST(req: Request) {
       { status: 503 },
     );
   }
+  // Wrong database or wrong-mode payment keys for this environment: no checkout.
+  const blocked = await environmentBlock();
+  if (blocked) return blocked;
 
   let body: unknown;
   try {

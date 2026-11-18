@@ -5,6 +5,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 
 import '../core/app_theme.dart';
 import '../core/payment_session.dart';
+import '../widgets/environment_indicators.dart';
 
 /// The payment provider's secure card page, shown inside the app.
 ///
@@ -177,6 +178,8 @@ class _SecurePaymentScreenState extends State<SecurePaymentScreen> {
               Icon(Icons.lock_rounded, size: 18, color: colors.primary),
               const SizedBox(width: 8),
               const Text('Secure payment'),
+              const SizedBox(width: 8),
+              const TestModeTag(),
             ],
           ),
           bottom: PreferredSize(

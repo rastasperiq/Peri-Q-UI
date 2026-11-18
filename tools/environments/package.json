@@ -1,0 +1,15 @@
+{
+  "name": "periq-environments",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Guarded TEST/LIVE database tooling for RastasperiQ. See DATABASE_ENVIRONMENTS.md.",
+  "type": "module",
+  "scripts": {
+    "db": "node db.mjs",
+    "test": "node --test guard.test.mjs"
+  },
+  "dependencies": {
+    "pg": "8.16.3"
+  },
+  "packageManager": "pnpm@11.9.0"
+}
