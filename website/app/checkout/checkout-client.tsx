@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, Clock3, ShieldCheck, Store, Truck } from "lucide-react";
+import { ArrowRight, Clock3, Loader2, MapPin, RotateCcw, ShieldCheck, Store, Truck } from "lucide-react";
 import { useCart } from "@/lib/cart";
 import { fetchMenu, isStoreOpenNow, type AppSettings } from "@/lib/menu";
 import { ensureAnonSession } from "@/lib/auth";
@@ -10,9 +10,11 @@ import { createBrowserClient, isSupabaseConfigured } from "@/lib/supabase";
 import { useCustomerAuth } from "@/lib/customer-auth";
 import { siteConfig } from "@/lib/site";
 import { recordCheckoutAcceptance } from "@/lib/policy-consent";
+import { deliveryFeeFor, normalizeDeliveryAddress, roundRand, type DeliveryQuote, type DeliveryQuoteError } from "@/lib/delivery";
 import { PolicyConsent, PrivacyNotice } from "@/components/policy-consent";
 
 type OrderType = "pickup" | "delivery";
+type QuoteState = "idle" | "loading" | "ready" | "error";
 const paymentMethod = "yoco";
 
 export default function CheckoutClient() {
@@ -30,6 +32,11 @@ export default function CheckoutClient() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [yocoAvailable, setYocoAvailable] = useState(false);
   const [yocoTestMode, setYocoTestMode] = useState(false);
+  const [quote, setQuote] = useState<DeliveryQuote | null>(null);
+  const [quoteState, setQuoteState] = useState<QuoteState>("idle");
+  const [quoteError, setQuoteError] = useState<string | null>(null);
+  const [quoteRetry, setQuoteRetry] = useState(0);
+  const quoteSeqRef = useRef(0);
   const submittingRef = useRef(false);
   const requestIdRef = useRef<string | null>(null);
   const profileName = profile?.full_name;
@@ -80,8 +87,65 @@ export default function CheckoutClient() {
     } catch {}
   }, [name, phone, address, orderType]);
 
-  const deliveryFee = settings?.deliveryFee ?? 30;
-  const totalForType = (t: OrderType) => subtotal + (t === "delivery" ? deliveryFee : 0);
+  // Delivery is priced by driving distance. The server quotes the distance;
+  // the database recalculates the fee at checkout, so this is display only.
+  const addressKey = normalizeDeliveryAddress(address);
+  const quoteMatches = !!quote && quoteState === "ready" && normalizeDeliveryAddress(quote.address) === addressKey;
+  const deliveryFee: number | null = quoteMatches && quote ? deliveryFeeFor(quote, subtotal) : null;
+  const deliveryFrom = settings?.deliveryMinFee ?? 20;
+  const pricePerKm = settings?.deliveryPricePerKm ?? 4;
+  const totalForType = (t: OrderType) => roundRand(subtotal + (t === "delivery" ? (deliveryFee ?? 0) : 0));
+  const deliveryReady = orderType !== "delivery" || deliveryFee !== null;
+
+  useEffect(() => {
+    if (orderType !== "delivery" || !settings?.deliveryAvailable) {
+      setQuoteState("idle");
+      setQuoteError(null);
+      return;
+    }
+    if (addressKey.length < 8) {
+      setQuote(null);
+      setQuoteState("idle");
+      setQuoteError(null);
+      return;
+    }
+    if (quote && normalizeDeliveryAddress(quote.address) === addressKey && quoteState === "ready") return;
+    const seq = ++quoteSeqRef.current;
+    setQuoteState("loading");
+    setQuoteError(null);
+    const timer = window.setTimeout(async () => {
+      try {
+        const anon = await ensureAnonSession();
+        if (!anon) throw new Error("Could not start a checkout session. Please refresh and try again.");
+        const supa = createBrowserClient();
+        const { data: sessData } = await supa.auth.getSession();
+        const token = sessData.session?.access_token ?? anon.accessToken;
+        const res = await fetch("/api/delivery/quote/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+          body: JSON.stringify({ address: address.trim() }),
+        });
+        const json = (await res.json().catch(() => ({}))) as Partial<DeliveryQuote> & Partial<DeliveryQuoteError>;
+        if (seq !== quoteSeqRef.current) return;
+        if (!res.ok || !json.quoteId) {
+          setQuote(null);
+          setQuoteState("error");
+          setQuoteError(json.error ?? "We couldn't calculate the delivery fee. Please try again or choose pickup.");
+          return;
+        }
+        setQuote(json as DeliveryQuote);
+        setQuoteState("ready");
+      } catch (e) {
+        if (seq !== quoteSeqRef.current) return;
+        setQuote(null);
+        setQuoteState("error");
+        setQuoteError(e instanceof Error && e.message ? e.message : "We couldn't calculate the delivery fee. Check your connection and try again.");
+      }
+    }, 900);
+    return () => window.clearTimeout(timer);
+    // Recalculate only when the address, fulfilment or a retry changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [addressKey, orderType, settings?.deliveryAvailable, quoteRetry]);
   const canPickup = settings?.pickupAvailable ?? true;
   const canDelivery = settings?.deliveryAvailable ?? true;
   const storeOpen = settings ? isStoreOpenNow(settings) : false;
@@ -96,6 +160,7 @@ export default function CheckoutClient() {
     if (settings && !globalStoreOpen) fe.store = "Ordering is paused by the restaurant right now.";
     else if (!storeOpen) fe.store = `Store is closed. Hours ${settings?.openingTime}–${settings?.closingTime} (Africa/Johannesburg).`;
     if (orderType === "delivery" && address.trim().length < 8) fe.address = "Enter a full delivery address (at least 8 chars, house + street).";
+    else if (orderType === "delivery" && deliveryFee === null) fe.address = quoteError ?? "Wait for the delivery fee to be calculated for this address.";
     if (paymentMethod === "yoco" && !yocoAvailable) fe.payment = "Online card payments are unavailable. Your cart stays saved. Please try again later.";
     if (!canPickup && orderType === "pickup") fe.orderType = "Pickup is unavailable right now.";
     if (!canDelivery && orderType === "delivery") fe.orderType = "Delivery is unavailable right now.";
@@ -153,10 +218,17 @@ export default function CheckoutClient() {
         p_expected_total: expectedTotal,
         p_client_request_id: clientRequestId,
         p_items: payloadItems,
+        p_delivery_quote_id: orderType === "delivery" ? quote?.quoteId ?? null : null,
       });
 
       if (rpcError) {
         const msg = rpcError.message || "";
+        if (msg.toLowerCase().includes("delivery fee needs recalculating")) {
+          setQuote(null);
+          setQuoteRetry((n) => n + 1);
+          throw new Error("Your delivery fee needed updating. We've recalculated it — please check the new total and pay again.");
+        }
+        if (msg.toLowerCase().includes("outside the delivery area")) throw new Error("That address is outside our delivery area. Please choose pickup or a closer address.");
         if (msg.toLowerCase().includes("price changed")) throw new Error("Price changed before checkout — a menu price or delivery fee changed while you were ordering. Your cart is still saved; review the updated total and try again.");
         if (msg.toLowerCase().includes("store is closed") || msg.toLowerCase().includes("ordering is paused")) throw new Error("Ordering is paused or the store is closed. Try during store hours.");
         if (msg.toLowerCase().includes("delivery is unavailable") || msg.toLowerCase().includes("pickup is unavailable")) throw new Error(msg);
@@ -221,7 +293,7 @@ export default function CheckoutClient() {
             <span className={`rounded-full px-3 py-1.5 ${!globalStoreOpen ? "bg-amber-500 text-charcoal" : storeOpen ? "bg-leaf text-white" : "bg-white/15 text-white"}`}>
               {!settings ? "Store status unavailable" : !globalStoreOpen ? "Ordering paused" : storeOpen ? `Open now • Closes ${settings?.closingTime}` : `Closed • Opens ${settings?.openingTime}`}
             </span>
-            <span className="rounded-full bg-white/10 px-3 py-1.5 text-white/70">{settings ? `Delivery fee R${deliveryFee.toFixed(0)}` : "Delivery fee confirmed when store settings load"}</span>
+            <span className="rounded-full bg-white/10 px-3 py-1.5 text-white/70">{settings ? `Delivery from R${deliveryFrom.toFixed(0)} • R${pricePerKm.toFixed(0)}/km` : "Delivery fee confirmed when store settings load"}</span>
           </div>
         </div>
       </section>
@@ -260,7 +332,7 @@ export default function CheckoutClient() {
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 {[
                   { id: "pickup" as const, icon: Store, title: "Pickup in Store", subtitle: "No delivery fee • Ready in ~25 min", enabled: canPickup },
-                  { id: "delivery" as const, icon: Truck, title: "Home Delivery", subtitle: `+R${deliveryFee.toFixed(0)} delivery fee • 45–60 min`, enabled: canDelivery },
+                  { id: "delivery" as const, icon: Truck, title: "Home Delivery", subtitle: deliveryFee !== null ? `R${deliveryFee.toFixed(2)} delivery fee • 45–60 min` : `From R${deliveryFrom.toFixed(0)}, priced by distance • 45–60 min`, enabled: canDelivery },
                 ].map(({ id, icon: Icon, title, subtitle, enabled }) => (
                   <button
                     key={id}
@@ -286,6 +358,30 @@ export default function CheckoutClient() {
                     <textarea autoComplete="street-address" aria-invalid={!!fieldErrors.address} value={address} onChange={(e) => setAddress(e.target.value)} placeholder="House number, street, area and landmark — e.g. 12 Main Rd, Heidedal, Bloemfontein — Ring side gate bell" rows={3} className="mt-1.5 w-full rounded-2xl border border-black/10 px-4 py-3 text-sm font-semibold focus:border-orange/60 focus:outline-none" />
                     {fieldErrors.address && <span className="mt-1 block text-xs font-bold text-red-600">{fieldErrors.address}</span>}
                   </label>
+                  <div data-testid="delivery-quote-status" aria-live="polite" className="mt-3 text-sm">
+                    {quoteState === "loading" && (
+                      <p className="flex items-center gap-2 font-semibold text-ash"><Loader2 size={16} className="animate-spin" aria-hidden="true" /> Calculating driving distance…</p>
+                    )}
+                    {quoteState === "ready" && quote && deliveryFee !== null && (
+                      <div className="rounded-2xl bg-muted p-3">
+                        <p className="flex items-center gap-2 font-extrabold text-charcoal"><MapPin size={16} className="text-peri-red" aria-hidden="true" /> {quote.distanceKm.toFixed(2)} km by road • Delivery R{deliveryFee.toFixed(2)}</p>
+                        <p className="mt-1 text-xs leading-5 text-ash">
+                          {deliveryFee === 0 && quote.freeDeliveryThreshold != null
+                            ? `Free delivery on orders of R${quote.freeDeliveryThreshold.toFixed(0)} or more.`
+                            : quote.baseFee + quote.distanceKm * quote.pricePerKm < quote.minFee
+                              ? `Minimum delivery fee R${quote.minFee.toFixed(2)}.`
+                              : `R${quote.baseFee.toFixed(2)} + ${quote.distanceKm.toFixed(2)} km × R${quote.pricePerKm.toFixed(2)}.`}{" "}
+                          Check the distance looks right for your address.
+                        </p>
+                      </div>
+                    )}
+                    {quoteState === "error" && quoteError && (
+                      <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-red-200 bg-red-50 p-3">
+                        <p className="font-bold text-red-900">{quoteError}</p>
+                        <button type="button" onClick={() => setQuoteRetry((n) => n + 1)} className="inline-flex items-center gap-1 text-xs font-black underline"><RotateCcw size={14} aria-hidden="true" /> Try again</button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -340,7 +436,7 @@ export default function CheckoutClient() {
 
             <div className="mt-4 grid gap-2 border-t border-black/8 pt-4 text-sm">
               <div className="flex justify-between"><span className="text-ash">Subtotal</span><span className="font-black">R{subtotal.toFixed(2)}</span></div>
-              <div className="flex justify-between"><span className="text-ash">Delivery fee</span><span className="font-black">{orderType === "delivery" ? `R${deliveryFee.toFixed(2)}` : "—"}</span></div>
+              <div className="flex justify-between"><span className="text-ash">Delivery fee</span><span className="font-black">{orderType !== "delivery" ? "—" : deliveryFee !== null ? `R${deliveryFee.toFixed(2)}` : quoteState === "loading" ? "Calculating…" : "Enter address"}</span></div>
               <div className="flex justify-between text-[1.05rem]"><span className="font-black">Total to pay now</span><span className="font-black text-peri-red">R{totalForType(orderType).toFixed(2)}</span></div>
               <p className="flex items-center gap-2 rounded-2xl bg-muted p-3 text-xs leading-5 text-ash"><ShieldCheck size={16} className="shrink-0 text-leaf" /> Your card details stay on the hosted payment page.</p>
             </div>
@@ -360,7 +456,7 @@ export default function CheckoutClient() {
               <PolicyConsent checked={acceptedPolicies} onChange={(value) => { setAcceptedPolicies(value); if (value) setFieldErrors((current) => { const rest = { ...current }; delete rest.consent; return rest; }); }} error={fieldErrors.consent} />
             </div>
 
-            <button onClick={handleSubmit} disabled={submitting || entries.length === 0 || !yocoAvailable || !settings || !storeOpen || !globalStoreOpen} aria-busy={submitting} className="button button-primary mt-6 w-full justify-center disabled:opacity-40">
+            <button onClick={handleSubmit} disabled={submitting || entries.length === 0 || !yocoAvailable || !settings || !storeOpen || !globalStoreOpen || !deliveryReady} aria-busy={submitting} className="button button-primary mt-6 w-full justify-center disabled:opacity-40">
               {submitting ? "Opening payment…" : `Pay by card • R${totalForType(orderType).toFixed(2)}`}
               {!submitting && <ArrowRight size={18} />}
             </button>

@@ -17,7 +17,9 @@ export default function CartClient() {
     void fetchMenu().then(({ appSettings }) => setSettings(appSettings)).catch(() => {});
   }, []);
 
-  const deliveryFee = settings?.deliveryFee ?? 30;
+  const deliveryFrom = settings?.deliveryMinFee ?? 20;
+  const pricePerKm = settings?.deliveryPricePerKm ?? 4;
+  const maxKm = settings?.deliveryMaxDistanceKm ?? 15;
   const hasItems = entries.length > 0;
 
   return (
@@ -80,10 +82,11 @@ export default function CartClient() {
             <h2 className="font-display text-2xl font-extrabold uppercase">Order summary</h2>
             <div className="mt-4 grid gap-3 text-sm">
               <div className="flex justify-between"><span className="text-ash">Subtotal</span><span className="font-black">R{subtotal.toFixed(2)}</span></div>
-              <div className="flex justify-between"><span className="text-ash">Delivery fee (if delivery)</span><span className="font-black">R{deliveryFee.toFixed(2)}</span></div>
+              <div className="flex justify-between gap-3"><span className="text-ash">Delivery fee (if delivery)</span><span className="text-right font-black">From R{deliveryFrom.toFixed(2)}</span></div>
+              <p className="text-xs leading-5 text-ash">Delivery is priced by driving distance (R{pricePerKm.toFixed(0)}/km, up to {maxKm.toFixed(0)} km). You&rsquo;ll see the exact fee at checkout once you enter your address.</p>
               <div className="h-px bg-black/8" />
               <div className="flex justify-between text-base"><span className="font-extrabold">Estimated pickup total</span><span className="font-black">R{subtotal.toFixed(2)}</span></div>
-              <div className="flex justify-between text-base text-peri-red"><span className="font-extrabold">Estimated delivery total</span><span className="font-black">R{(subtotal + deliveryFee).toFixed(2)}</span></div>
+              <div className="flex justify-between text-base text-peri-red"><span className="font-extrabold">Estimated delivery total</span><span className="font-black">From R{(subtotal + deliveryFrom).toFixed(2)}</span></div>
               <p className="rounded-2xl bg-muted p-3 text-xs leading-5 text-ash">Your final total is confirmed at checkout. If a price has changed, you&rsquo;ll be told before paying and your cart stays saved.</p>
             </div>
 

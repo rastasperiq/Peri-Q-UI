@@ -15,11 +15,13 @@ import 'package:peri_q_app/src/core/payment_session.dart';
 import 'package:peri_q_app/src/models/app_auth_session.dart';
 import 'package:peri_q_app/src/models/app_preferences.dart';
 import 'package:peri_q_app/src/models/app_settings.dart';
+import 'package:peri_q_app/src/models/delivery_quote.dart';
 import 'package:peri_q_app/src/models/menu_category.dart';
 import 'package:peri_q_app/src/models/menu_item.dart';
 import 'package:peri_q_app/src/models/order.dart';
 import 'package:peri_q_app/src/models/todays_special_settings.dart';
 import 'package:peri_q_app/src/repositories/auth_repository.dart';
+import 'package:peri_q_app/src/repositories/delivery_quote_repository.dart';
 import 'package:peri_q_app/src/repositories/menu_repository.dart';
 import 'package:peri_q_app/src/repositories/notification_repository.dart';
 import 'package:peri_q_app/src/repositories/order_repository.dart';
@@ -111,6 +113,109 @@ void main() {
       });
     }
   }
+
+  group('Distance-based delivery pricing', () {
+    test('quotes fees from driving distance with the minimum fee', () async {
+      final harness = _ControllerHarness(
+        appSettings: const AppSettings(openingTime: '00:00', closingTime: '00:00'),
+      );
+      await harness.controller.bootstrapFuture;
+      harness.controller.addToCart(_menuItem(id: 'plate', name: 'Plate'));
+      final subtotal = harness.controller.subtotal;
+      for (final (address, fee) in [
+        ('1 One km Road, Bloemfontein', 20.0),
+        ('3 Main Road, Bloemfontein', 27.0),
+        ('5 Five km Road, Bloemfontein', 35.0),
+        ('10 Ten km Road, Bloemfontein', 55.0),
+      ]) {
+        await harness.controller.quoteDelivery(address);
+        expect(
+          harness.controller.deliveryFeeFor(OrderType.delivery, address: address),
+          fee,
+          reason: address,
+        );
+        expect(
+          harness.controller.totalFor(OrderType.delivery, address: address),
+          subtotal + fee,
+        );
+      }
+      expect(harness.controller.deliveryFeeFor(OrderType.pickup), 0);
+    });
+
+    test('ignores a late quote for an address the customer changed', () async {
+      final quotes = _FakeDeliveryQuoteRepository();
+      final slow = Completer<DeliveryQuote>();
+      quotes.held['10 Ten km Road, Bloemfontein'] = slow;
+      final harness = _ControllerHarness(
+        appSettings: const AppSettings(openingTime: '00:00', closingTime: '00:00'),
+        deliveryQuoteRepository: quotes,
+      );
+      await harness.controller.bootstrapFuture;
+      final first = harness.controller.quoteDelivery(
+        '10 Ten km Road, Bloemfontein',
+      );
+      expect(harness.controller.isQuotingDelivery, isTrue);
+      await harness.controller.quoteDelivery('5 Five km Road, Bloemfontein');
+      slow.complete(
+        _FakeDeliveryQuoteRepository.quoteFor('10 Ten km Road, Bloemfontein'),
+      );
+      await first;
+      expect(harness.controller.deliveryQuote?.distanceKm, 5);
+      expect(harness.controller.isQuotingDelivery, isFalse);
+    });
+
+    test('reuses a quote for the same address and reports failures', () async {
+      final quotes = _FakeDeliveryQuoteRepository();
+      final harness = _ControllerHarness(
+        appSettings: const AppSettings(openingTime: '00:00', closingTime: '00:00'),
+        deliveryQuoteRepository: quotes,
+      );
+      await harness.controller.bootstrapFuture;
+      await harness.controller.quoteDelivery('3 Main Road, Bloemfontein');
+      await harness.controller.quoteDelivery('  3 MAIN road,  Bloemfontein ');
+      expect(quotes.calls, 1);
+      await harness.controller.quoteDelivery('3 Main Road, Bloemfontein', force: true);
+      expect(quotes.calls, 2);
+
+      await harness.controller.quoteDelivery('Somewhere nowhere road');
+      expect(harness.controller.deliveryQuote, isNull);
+      expect(harness.controller.deliveryQuoteError, contains("couldn't find"));
+      await harness.controller.startGuestSession();
+      await harness.controller.updateCustomer(name: 'Cus Tomer', phone: '0712345678');
+      harness.controller.addToCart(_menuItem(id: 'plate', name: 'Plate'));
+      await expectLater(
+        harness.controller.placeOrder(
+          orderType: OrderType.delivery,
+          paymentMethod: PaymentMethod.yoco,
+          deliveryAddress: 'Somewhere nowhere road',
+        ),
+        throwsA(isA<OrderSubmissionException>()),
+      );
+      expect(harness.orders.lastDraft, isNull);
+    });
+
+    test('sends the priced total and quote with the order', () async {
+      final harness = _ControllerHarness(
+        appSettings: const AppSettings(openingTime: '00:00', closingTime: '00:00'),
+      );
+      await harness.controller.bootstrapFuture;
+      await harness.controller.startGuestSession();
+      await harness.controller.updateCustomer(name: 'Cus Tomer', phone: '0712345678');
+      harness.controller.addToCart(_menuItem(id: 'plate', name: 'Plate'));
+      const address = '10 Ten km Road, Bloemfontein';
+      await harness.controller.quoteDelivery(address);
+      final itemsTotal = harness.controller.subtotal;
+      await harness.controller.placeOrder(
+        orderType: OrderType.delivery,
+        paymentMethod: PaymentMethod.yoco,
+        deliveryAddress: address,
+      );
+      final draft = harness.orders.lastDraft!;
+      expect(draft.totalPrice, itemsTotal + 55);
+      expect(draft.deliveryQuoteId, isNotNull);
+      expect(draft.deliveryAddress, address);
+    });
+  });
 
   group('AppController authentication', () {
     test(
@@ -847,7 +952,6 @@ void main() {
         appSettings: const AppSettings(
           openingTime: '00:00',
           closingTime: '00:00',
-          deliveryFee: 35,
         ),
       );
       await harness.controller.bootstrapFuture;
@@ -868,7 +972,17 @@ void main() {
       );
       expect(harness.controller.cartCount, 2);
       expect(harness.controller.subtotal, 130);
+      // No address priced yet: delivery adds nothing until quoted.
+      expect(harness.controller.totalFor(OrderType.delivery), 130);
+      await harness.controller.quoteDelivery('5 Five Km Road, Bloemfontein');
       expect(harness.controller.totalFor(OrderType.delivery), 165);
+      expect(
+        harness.controller.totalFor(
+          OrderType.delivery,
+          address: 'Another Street, Bloemfontein',
+        ),
+        130,
+      );
 
       final cartItem = harness.controller.cart.single;
       harness.controller.incrementCartItem(cartItem);
@@ -925,12 +1039,26 @@ void main() {
         );
         expect(harness.orders.lastDraft, isNull);
 
+        // A delivery address must be priced before payment.
+        await expectLater(
+          harness.controller.placeOrder(
+            orderType: OrderType.delivery,
+            paymentMethod: PaymentMethod.yoco,
+            deliveryAddress:
+                '12 Main Street, Bloemfontein\nRing the side gate bell.',
+          ),
+          throwsA(isA<OrderSubmissionException>()),
+        );
+        await harness.controller.quoteDelivery(
+          '12 Main Street, Bloemfontein\nRing the side gate bell.',
+        );
         await harness.controller.placeOrder(
           orderType: OrderType.delivery,
           paymentMethod: PaymentMethod.yoco,
           deliveryAddress:
               '12 Main Street, Bloemfontein\nRing the side gate bell.',
         );
+        expect(harness.orders.lastDraft?.deliveryQuoteId, 'quote-1');
 
         expect(harness.orders.lastDraft?.customerName, 'Delivery Customer');
         expect(harness.orders.lastDraft?.customerPhone, '+27 712345678');
@@ -1034,7 +1162,9 @@ class _ControllerHarness {
     AppPreferences? seedPreferences,
     _FakeNotificationRepository? notificationRepository,
     _FakeOrderRepository? orderRepository,
+    DeliveryQuoteRepository? deliveryQuoteRepository,
   }) : auth = _FakeAuthRepository(),
+       quotes = deliveryQuoteRepository ?? _FakeDeliveryQuoteRepository(),
        menu = _FakeMenuRepository(
          menuItems ?? const [],
          menuCategories ?? const [],
@@ -1058,9 +1188,11 @@ class _ControllerHarness {
       preferencesRepository: preferences,
       storeRepository: store,
       notificationRepository: notifications,
+      deliveryQuoteRepository: quotes,
     );
   }
 
+  final DeliveryQuoteRepository quotes;
   final _FakeAuthRepository auth;
   final _FakeMenuRepository menu;
   final _FakeOrderRepository orders;
@@ -1474,4 +1606,46 @@ Future<void> _acceptPolicies(WidgetTester tester) async {
   await tester.ensureVisible(checkbox);
   await tester.tap(checkbox);
   await tester.pump();
+}
+
+
+/// Prices addresses like the server would: the number in the address (or
+/// 3 km) is the driving distance, at R15 + R4/km with a R20 minimum.
+class _FakeDeliveryQuoteRepository implements DeliveryQuoteRepository {
+  int calls = 0;
+  final Map<String, Completer<DeliveryQuote>> held = {};
+
+  @override
+  Future<DeliveryQuote> requestQuote(String address) async {
+    calls++;
+    if (address.toLowerCase().contains('nowhere')) {
+      throw const DeliveryQuoteException(
+        "We couldn't find that address.",
+        code: 'address_not_found',
+      );
+    }
+    final hold = held[address];
+    if (hold != null) return hold.future;
+    return quoteFor(address, id: 'quote-$calls');
+  }
+
+  static DeliveryQuote quoteFor(String address, {String id = 'quote-1'}) {
+    final words = {'one': 1, 'five': 5, 'ten': 10, 'sixteen': 16};
+    var km = 3.0;
+    words.forEach((word, value) {
+      if (address.toLowerCase().contains('$word km')) km = value.toDouble();
+    });
+    final raw = 15 + km * 4;
+    return DeliveryQuote(
+      quoteId: id,
+      address: address,
+      distanceKm: km,
+      durationMinutes: 10,
+      deliveryFee: raw < 20 ? 20 : raw,
+      baseFee: 15,
+      pricePerKm: 4,
+      minFee: 20,
+      maxDistanceKm: 15,
+    );
+  }
 }

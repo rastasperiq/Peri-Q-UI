@@ -161,7 +161,7 @@ export default function MenuClient({ initial = null }: { initial?: InitialMenu }
     }
   };
 
-  const deliveryFee = appSettings?.deliveryFee ?? 30;
+  const deliveryFrom = appSettings?.deliveryMinFee ?? 20;
   const lineTotal = customizing
     ? (customizing.price + custom.selectedAddOns.reduce((s, a) => s + a.price, 0)) * custom.quantity
     : 0;
@@ -175,7 +175,7 @@ export default function MenuClient({ initial = null }: { initial?: InitialMenu }
             <OpenBadge settings={appSettings} />
             {appSettings?.deliveryAvailable !== false && (
               <span className="inline-flex min-h-9 items-center gap-2 rounded-full border border-white/12 bg-white/6 px-3.5 text-xs font-extrabold text-smoke">
-                <Truck size={15} aria-hidden="true" /> Delivery +R{deliveryFee.toFixed(0)}
+                <Truck size={15} aria-hidden="true" /> Delivery from R{deliveryFrom.toFixed(0)}
               </span>
             )}
             {appSettings && !appSettings.storeOpen && (

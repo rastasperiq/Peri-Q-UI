@@ -19,14 +19,14 @@ describe("Menu loading (shared data)", () => {
 
 describe("Store hours validation (server trusts same logic)", () => {
   it("detects open within hours", () => {
-    const settings = { storeOpen: true, pickupAvailable: true, deliveryAvailable: true, deliveryFee: 30, openingTime: "10:00", closingTime: "21:00" };
+    const settings = { storeOpen: true, pickupAvailable: true, deliveryAvailable: true, deliveryFee: 30, deliveryBaseFee: 15, deliveryPricePerKm: 4, deliveryMinFee: 20, deliveryMaxDistanceKm: 15, deliveryFreeThreshold: null, openingTime: "10:00", closingTime: "21:00" };
     // 12:00 local should be open
     const noon = new Date("2026-10-12T10:00:00Z");
     expect(isStoreOpenNow(settings, noon)).toBe(true);
   });
 
   it("detects closed outside hours", () => {
-    const settings = { storeOpen: true, pickupAvailable: true, deliveryAvailable: true, deliveryFee: 30, openingTime: "10:00", closingTime: "21:00" };
+    const settings = { storeOpen: true, pickupAvailable: true, deliveryAvailable: true, deliveryFee: 30, deliveryBaseFee: 15, deliveryPricePerKm: 4, deliveryMinFee: 20, deliveryMaxDistanceKm: 15, deliveryFreeThreshold: null, openingTime: "10:00", closingTime: "21:00" };
     const early = new Date("2026-10-12T07:00:00Z");
     expect(isStoreOpenNow(settings, early)).toBe(false);
     const late = new Date("2026-10-12T20:00:00Z");
@@ -34,7 +34,7 @@ describe("Store hours validation (server trusts same logic)", () => {
   });
 
   it("respects storeOpen global toggle", () => {
-    const settings = { storeOpen: false, pickupAvailable: true, deliveryAvailable: true, deliveryFee: 30, openingTime: "10:00", closingTime: "21:00" };
+    const settings = { storeOpen: false, pickupAvailable: true, deliveryAvailable: true, deliveryFee: 30, deliveryBaseFee: 15, deliveryPricePerKm: 4, deliveryMinFee: 20, deliveryMaxDistanceKm: 15, deliveryFreeThreshold: null, openingTime: "10:00", closingTime: "21:00" };
     const noon = new Date("2026-10-12T10:00:00Z");
     expect(isStoreOpenNow(settings, noon)).toBe(false);
   });

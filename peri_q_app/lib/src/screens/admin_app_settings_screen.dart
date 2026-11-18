@@ -26,7 +26,12 @@ class _AdminAppSettingsScreenState extends State<AdminAppSettingsScreen> {
   late bool storeOpen;
   late bool pickupAvailable;
   late bool deliveryAvailable;
-  late final TextEditingController deliveryFeeController;
+  late final TextEditingController baseFeeController;
+  late final TextEditingController pricePerKmController;
+  late final TextEditingController minFeeController;
+  late final TextEditingController maxDistanceController;
+  late final TextEditingController freeThresholdController;
+  late bool freeDeliveryEnabled;
   late bool specialEnabled;
   String? selectedMenuItemId;
   bool isSaving = false;
@@ -42,9 +47,31 @@ class _AdminAppSettingsScreenState extends State<AdminAppSettingsScreen> {
     storeOpen = settings.storeOpen;
     pickupAvailable = settings.pickupAvailable;
     deliveryAvailable = settings.deliveryAvailable;
-    deliveryFeeController = TextEditingController(
-      text: settings.deliveryFee.toStringAsFixed(0),
+    baseFeeController = TextEditingController(
+      text: _money(settings.deliveryBaseFee),
     );
+    pricePerKmController = TextEditingController(
+      text: _money(settings.deliveryPricePerKm),
+    );
+    minFeeController = TextEditingController(
+      text: _money(settings.deliveryMinFee),
+    );
+    maxDistanceController = TextEditingController(
+      text: _money(settings.deliveryMaxDistanceKm),
+    );
+    freeDeliveryEnabled = settings.deliveryFreeThreshold != null;
+    freeThresholdController = TextEditingController(
+      text: settings.deliveryFreeThreshold == null
+          ? ''
+          : _money(settings.deliveryFreeThreshold!),
+    );
+    for (final field in [
+      baseFeeController,
+      pricePerKmController,
+      minFeeController,
+    ]) {
+      field.addListener(_refreshExample);
+    }
     specialEnabled = special.enabled;
     selectedMenuItemId = special.menuItemId;
     openingTimeController = TextEditingController(text: settings.openingTime);
@@ -67,8 +94,46 @@ class _AdminAppSettingsScreenState extends State<AdminAppSettingsScreen> {
     titleController.dispose();
     subtitleController.dispose();
     imagePathController.dispose();
-    deliveryFeeController.dispose();
+    baseFeeController.dispose();
+    pricePerKmController.dispose();
+    minFeeController.dispose();
+    maxDistanceController.dispose();
+    freeThresholdController.dispose();
     super.dispose();
+  }
+
+  void _refreshExample() {
+    if (mounted) setState(() {});
+  }
+
+  static String _money(double value) => value == value.roundToDouble()
+      ? value.toStringAsFixed(0)
+      : value.toStringAsFixed(2);
+
+  static double? _parse(TextEditingController controller) =>
+      double.tryParse(controller.text.trim().replaceAll(',', '.'));
+
+  /// Fee for [km] with the values currently typed, using the server formula.
+  String _exampleFee(double km) {
+    final base = _parse(baseFeeController) ?? 0;
+    final perKm = _parse(pricePerKmController) ?? 0;
+    final minimum = _parse(minFeeController) ?? 0;
+    final fee = [base + km * perKm, minimum].reduce((a, b) => a > b ? a : b);
+    return 'R${((fee * 100).round() / 100).toStringAsFixed(2)}';
+  }
+
+  FormFieldValidator<String> _amount(String label, double max, {
+    bool positive = false,
+  }) {
+    return (value) {
+      final number = double.tryParse((value ?? '').trim().replaceAll(',', '.'));
+      if (number == null || number < 0 || number > max || (positive && number == 0)) {
+        return positive
+            ? 'Enter $label above 0 and up to ${max.toStringAsFixed(0)}.'
+            : 'Enter $label from 0 to ${max.toStringAsFixed(0)}.';
+      }
+      return null;
+    };
   }
 
   Future<void> _save() async {
@@ -77,13 +142,24 @@ class _AdminAppSettingsScreenState extends State<AdminAppSettingsScreen> {
     }
 
     setState(() => isSaving = true);
+    final current = widget.controller.appSettings;
     try {
       await widget.controller.updateAppSettings(
         AppSettings(
           storeOpen: storeOpen,
           pickupAvailable: pickupAvailable,
           deliveryAvailable: deliveryAvailable,
-          deliveryFee: double.parse(deliveryFeeController.text.trim()),
+          deliveryFee: widget.controller.appSettings.deliveryFee,
+          // Hidden fields (delivery off) keep their saved values.
+          deliveryBaseFee: _parse(baseFeeController) ?? current.deliveryBaseFee,
+          deliveryPricePerKm:
+              _parse(pricePerKmController) ?? current.deliveryPricePerKm,
+          deliveryMinFee: _parse(minFeeController) ?? current.deliveryMinFee,
+          deliveryMaxDistanceKm:
+              _parse(maxDistanceController) ?? current.deliveryMaxDistanceKm,
+          deliveryFreeThreshold: freeDeliveryEnabled
+              ? _parse(freeThresholdController) ?? current.deliveryFreeThreshold
+              : null,
           openingTime: openingTimeController.text.trim(),
           closingTime: closingTimeController.text.trim(),
           todaysSpecial: TodaysSpecialSettings(
@@ -136,7 +212,7 @@ class _AdminAppSettingsScreenState extends State<AdminAppSettingsScreen> {
       storeOpen: storeOpen,
       pickupAvailable: pickupAvailable,
       deliveryAvailable: deliveryAvailable,
-      deliveryFee: double.tryParse(deliveryFeeController.text.trim()) ?? 30,
+      deliveryFee: widget.controller.appSettings.deliveryFee,
       openingTime: openingTimeController.text.trim(),
       closingTime: closingTimeController.text.trim(),
     );
@@ -187,22 +263,112 @@ class _AdminAppSettingsScreenState extends State<AdminAppSettingsScreen> {
                   ),
                   if (deliveryAvailable) ...[
                     const SizedBox(height: 8),
-                    TextFormField(
-                      controller: deliveryFeeController,
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                      decoration: const InputDecoration(
-                        labelText: 'Delivery fee (R)',
-                      ),
-                      validator: (value) {
-                        final fee = double.tryParse(value?.trim() ?? '');
-                        if (fee == null || fee < 0 || fee > 1000) {
-                          return 'Enter a fee from R0 to R1000.';
-                        }
-                        return null;
-                      },
+                    Text(
+                      'Delivery pricing (by driving distance)',
+                      style: Theme.of(context).textTheme.titleMedium,
                     ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Fee = base fee + km × price per km, never below the '
+                      'minimum. Customers see the exact fee at checkout.',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            key: const ValueKey('delivery-base-fee'),
+                            controller: baseFeeController,
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            decoration: const InputDecoration(
+                              labelText: 'Base fee (R)',
+                            ),
+                            validator: _amount('a base fee', 1000),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: TextFormField(
+                            key: const ValueKey('delivery-price-per-km'),
+                            controller: pricePerKmController,
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            decoration: const InputDecoration(
+                              labelText: 'Price per km (R)',
+                            ),
+                            validator: _amount('a price per km', 1000),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            key: const ValueKey('delivery-min-fee'),
+                            controller: minFeeController,
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            decoration: const InputDecoration(
+                              labelText: 'Minimum fee (R)',
+                            ),
+                            validator: _amount('a minimum fee', 1000),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: TextFormField(
+                            key: const ValueKey('delivery-max-distance'),
+                            controller: maxDistanceController,
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            decoration: const InputDecoration(
+                              labelText: 'Max distance (km)',
+                            ),
+                            validator: _amount(
+                              'a distance',
+                              100,
+                              positive: true,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Examples: 1 km ${_exampleFee(1)} • 5 km ${_exampleFee(5)} '
+                      '• 10 km ${_exampleFee(10)}',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    SwitchListTile.adaptive(
+                      value: freeDeliveryEnabled,
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Free delivery above an order amount'),
+                      subtitle: const Text(
+                        'Off by default. Applies to the food subtotal.',
+                      ),
+                      onChanged: (value) =>
+                          setState(() => freeDeliveryEnabled = value),
+                    ),
+                    if (freeDeliveryEnabled)
+                      TextFormField(
+                        key: const ValueKey('delivery-free-threshold'),
+                        controller: freeThresholdController,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        decoration: const InputDecoration(
+                          labelText: 'Free delivery from order subtotal (R)',
+                        ),
+                        validator: _amount('an amount', 100000),
+                      ),
                   ],
                   const SizedBox(height: 12),
                   LayoutBuilder(

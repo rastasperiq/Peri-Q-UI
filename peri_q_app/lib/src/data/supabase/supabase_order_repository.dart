@@ -80,6 +80,7 @@ order_items (
           'p_delivery_address': order.deliveryAddress,
           'p_expected_total': order.totalPrice,
           'p_client_request_id': order.clientRequestId,
+          'p_delivery_quote_id': order.deliveryQuoteId,
           'p_items': order.items
               .map(
                 (item) => {
@@ -431,6 +432,14 @@ order_items (
     }
     if (message.contains('delivery is unavailable')) {
       return 'Delivery is not available right now. Choose pickup instead.';
+    }
+    if (message.contains('delivery fee needs recalculating')) {
+      return 'Your delivery fee needs updating. Check the delivery address '
+          'and wait for the new fee, then pay again.';
+    }
+    if (message.contains('outside the delivery area')) {
+      return 'That address is outside our delivery area. Choose pickup or a '
+          'closer address.';
     }
     if (message.contains('price changed')) {
       return 'A price changed while you were checking out. Review the updated cart total and submit again.';

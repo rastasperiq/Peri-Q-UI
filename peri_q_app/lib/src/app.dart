@@ -12,6 +12,7 @@ import 'core/app_theme.dart';
 import 'core/supabase_config.dart';
 import 'data/local/shared_preferences_repository.dart';
 import 'data/supabase/supabase_auth_repository.dart';
+import 'data/supabase/supabase_delivery_quote_repository.dart';
 import 'data/supabase/supabase_menu_repository.dart';
 import 'data/supabase/supabase_order_repository.dart';
 import 'data/supabase/supabase_store_repository.dart';
@@ -59,6 +60,7 @@ class _PeriQAppState extends State<PeriQApp> {
       preferencesRepository: SharedPreferencesRepository(),
       storeRepository: SupabaseStoreRepository(client: client),
       notificationRepository: widget.notificationRepository,
+      deliveryQuoteRepository: SupabaseDeliveryQuoteRepository(client: client),
     );
 
     _authSubscription = client.auth.onAuthStateChange.listen(

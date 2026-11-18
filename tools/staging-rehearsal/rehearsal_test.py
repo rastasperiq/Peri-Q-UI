@@ -94,8 +94,8 @@ def test(name):
 def _(c):
     c.execute("select relname, relrowsecurity from pg_class where relname in ('checkout_intents','checkout_intent_items') order by 1")
     assert dict(c.fetchall()) == {"checkout_intent_items": True, "checkout_intents": True}
-    c.execute("""select has_function_privilege('authenticated','public.prepare_card_checkout(text,text,text,text,text,numeric,text,jsonb)','execute'),
-                        has_function_privilege('anon','public.prepare_card_checkout(text,text,text,text,text,numeric,text,jsonb)','execute'),
+    c.execute("""select has_function_privilege('authenticated','public.prepare_card_checkout(text,text,text,text,text,numeric,text,jsonb,uuid)','execute'),
+                        has_function_privilege('anon','public.prepare_card_checkout(text,text,text,text,text,numeric,text,jsonb,uuid)','execute'),
                         has_function_privilege('authenticated','public.finalize_card_checkout(text,text,integer,text)','execute'),
                         has_function_privilege('anon','public.finalize_card_checkout(text,text,integer,text)','execute'),
                         has_function_privilege('service_role','public.finalize_card_checkout(text,text,integer,text)','execute')""")
@@ -214,12 +214,13 @@ def _(c):
                   contains="address")
 
 
-@test("delivery total includes the configured delivery fee")
+@test("delivery needs a server distance quote; the old flat fee is refused")
 def _(c):
+    # Distance pricing (20261117120000): delivery_pricing_test.py covers the fee itself.
     as_user(c, ALICE)
-    prepare(c, "Alice", "0821234567", "req-deliv-0002", 75.00, order_type="delivery", address="12 Main Road, Soweto")
-    c.execute("select total_price, payment_amount_cents from public.checkout_intents where client_request_id='req-deliv-0002'")
-    assert c.fetchone() == (75.00, 7500)
+    expect_raises(c, "select public.prepare_card_checkout(%s,%s,%s,%s,%s,%s::numeric,%s,%s::jsonb)",
+                  ["Alice", "0821234567", "delivery", "yoco", "12 Main Road, Soweto", 75.00, "req-deliv-0002", ITEMS_OK],
+                  contains="needs recalculating")
 
 
 @test("RLS isolates drafts between customers")

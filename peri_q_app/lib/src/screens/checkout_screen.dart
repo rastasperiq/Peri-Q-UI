@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -7,6 +9,7 @@ import '../core/app_theme.dart';
 import '../core/external_links.dart';
 import '../core/payment_session.dart';
 import '../models/app_preferences.dart';
+import '../models/delivery_quote.dart';
 import '../models/menu_item.dart';
 import '../models/order.dart';
 import '../repositories/order_repository.dart';
@@ -31,6 +34,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   PaymentMethod paymentMethod = PaymentMethod.yoco;
   String? selectedAddressId;
   bool isSubmitting = false;
+  Timer? _quoteDebounce;
 
   @override
   void initState() {
@@ -52,21 +56,59 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     for (final field in [nameController, phoneController, addressController]) {
       field.addListener(_refreshReview);
     }
+    addressController.addListener(_scheduleDeliveryQuote);
+    widget.controller.addListener(_refreshReview);
+    if (orderType == OrderType.delivery) {
+      _quoteDebounce = Timer(Duration.zero, _requestDeliveryQuote);
+    }
   }
 
   void _refreshReview() {
     if (mounted) setState(() {});
   }
 
+  String _lastQuotedAddress = '';
+
+  /// Re-prices delivery a moment after the customer stops typing.
+  void _scheduleDeliveryQuote() {
+    if (orderType != OrderType.delivery) return;
+    final key = normalizeDeliveryAddress(addressController.text);
+    if (key == _lastQuotedAddress) return;
+    _quoteDebounce?.cancel();
+    _quoteDebounce = Timer(
+      const Duration(milliseconds: 900),
+      _requestDeliveryQuote,
+    );
+  }
+
+  void _requestDeliveryQuote({bool force = false}) {
+    if (!mounted || orderType != OrderType.delivery) return;
+    _lastQuotedAddress = normalizeDeliveryAddress(addressController.text);
+    unawaited(
+      widget.controller.quoteDelivery(addressController.text, force: force),
+    );
+  }
+
   @override
   void dispose() {
+    _quoteDebounce?.cancel();
+    widget.controller.removeListener(_refreshReview);
     nameController.dispose();
     phoneController.dispose();
     addressController.dispose();
     super.dispose();
   }
 
-  void _selectOrderType(OrderType type) => setState(() => orderType = type);
+  void _selectOrderType(OrderType type) {
+    setState(() => orderType = type);
+    _quoteDebounce?.cancel();
+    if (type == OrderType.delivery) {
+      _lastQuotedAddress = '';
+      _requestDeliveryQuote();
+    } else {
+      widget.controller.cancelDeliveryQuote();
+    }
+  }
 
   void _selectSavedAddress(String addressId) {
     SavedAddress? address;
@@ -118,6 +160,10 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       final message = error is OrderSubmissionException
           ? error.message
           : 'We could not place your order. Check your connection and try again.';
+      if (orderType == OrderType.delivery &&
+          message.toLowerCase().contains('delivery fee')) {
+        _requestDeliveryQuote(force: true);
+      }
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(message)));
@@ -127,7 +173,14 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final total = widget.controller.totalFor(orderType);
+    final controller = widget.controller;
+    final address = addressController.text.trim();
+    final total = controller.totalFor(orderType, address: address);
+    final quote = controller.deliveryQuote;
+    final quoteReady =
+        quote != null && controller.hasDeliveryQuoteFor(address);
+    final deliveryPriced = orderType != OrderType.delivery || quoteReady;
+    final settings = controller.appSettings;
     return Scaffold(
       appBar: AppBar(title: const Text('Checkout')),
       body: SingleChildScrollView(
@@ -216,8 +269,10 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                 selected: orderType == OrderType.delivery,
                 icon: Icons.two_wheeler_rounded,
                 title: 'Home Delivery',
-                subtitle:
-                    '+R${widget.controller.appSettings.deliveryFee.toStringAsFixed(0)} delivery fee • 45 to 60 minutes',
+                subtitle: quoteReady
+                    ? '${formatRand(quote.feeFor(controller.subtotal))} delivery fee • 45 to 60 minutes'
+                    : 'From ${formatRand(settings.deliveryMinFee)}, priced by '
+                          'driving distance • 45 to 60 minutes',
                 onTap: () => _selectOrderType(OrderType.delivery),
                 enabled: widget.controller.canUseOrderType(OrderType.delivery),
               ),
@@ -288,6 +343,18 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                     return null;
                   },
                 ),
+                const SizedBox(height: 10),
+                _DeliveryQuoteStatus(
+                  key: const ValueKey('checkout-delivery-quote'),
+                  quote: quoteReady ? quote : null,
+                  subtotal: controller.subtotal,
+                  isLoading: controller.isQuotingDelivery,
+                  error: controller.deliveryQuoteError,
+                  addressEntered: address.length >= 8,
+                  pricePerKm: settings.deliveryPricePerKm,
+                  maxDistanceKm: settings.deliveryMaxDistanceKm,
+                  onRetry: () => _requestDeliveryQuote(force: true),
+                ),
               ],
               const SizedBox(height: 24),
               Text(
@@ -318,7 +385,10 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                 customerName: nameController.text.trim(),
                 customerPhone: phoneController.text.trim(),
                 subtotal: widget.controller.subtotal,
-                deliveryFee: widget.controller.deliveryFeeFor(orderType),
+                deliveryFee: quoteReady
+                    ? controller.deliveryFeeFor(orderType, address: address)
+                    : null,
+                deliveryFeePending: controller.isQuotingDelivery,
                 total: total,
                 onEditCart: () => Navigator.of(context).maybePop(),
               ),
@@ -351,9 +421,15 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                 ? const _CardPaymentProgress(key: ValueKey('checkout-placing'))
                 : ElevatedButton.icon(
                     key: const ValueKey('checkout-place-order-button'),
-                    onPressed: _submitOrder,
+                    onPressed: deliveryPriced ? _submitOrder : null,
                     icon: const Icon(Icons.lock_rounded, size: 18),
-                    label: Text('Pay by card • R${total.toStringAsFixed(0)}'),
+                    label: Text(
+                      deliveryPriced
+                          ? 'Pay by card • ${formatRand(total)}'
+                          : controller.isQuotingDelivery
+                          ? 'Calculating delivery fee…'
+                          : 'Enter your delivery address',
+                    ),
                   ),
           ),
         ),
@@ -754,6 +830,7 @@ class _OrderReview extends StatelessWidget {
     required this.customerPhone,
     required this.subtotal,
     required this.deliveryFee,
+    this.deliveryFeePending = false,
     required this.total,
     required this.onEditCart,
   });
@@ -764,7 +841,10 @@ class _OrderReview extends StatelessWidget {
   final String customerName;
   final String customerPhone;
   final double subtotal;
-  final double deliveryFee;
+
+  /// Null until the delivery address has been priced.
+  final double? deliveryFee;
+  final bool deliveryFeePending;
   final double total;
   final VoidCallback onEditCart;
 
@@ -845,14 +925,22 @@ class _OrderReview extends StatelessWidget {
                       ],
                     ),
                   ),
-                  Text('R${line.total.toStringAsFixed(0)}'),
+                  Text(formatRand(line.total)),
                 ],
               ),
             ),
           const Divider(height: 20),
           _SummaryRow(label: 'Subtotal', amount: subtotal),
           if (orderType == OrderType.delivery)
-            _SummaryRow(label: 'Delivery', amount: deliveryFee),
+            _SummaryRow(
+              label: 'Delivery',
+              amount: deliveryFee ?? 0,
+              valueText: deliveryFee != null
+                  ? null
+                  : deliveryFeePending
+                  ? 'Calculating…'
+                  : 'Enter address',
+            ),
           _SummaryRow(label: 'Total to pay now', amount: total, strong: true),
           const Divider(height: 20),
           Text(fulfilment, style: theme.textTheme.bodyMedium),
@@ -884,11 +972,13 @@ class _SummaryRow extends StatelessWidget {
     required this.label,
     required this.amount,
     this.strong = false,
+    this.valueText,
   });
 
   final String label;
   final double amount;
   final bool strong;
+  final String? valueText;
 
   @override
   Widget build(BuildContext context) {
@@ -900,8 +990,138 @@ class _SummaryRow extends StatelessWidget {
       child: Row(
         children: [
           Expanded(child: Text(label, style: style)),
-          Text('R${amount.toStringAsFixed(0)}', style: style),
+          Text(valueText ?? formatRand(amount), style: style),
         ],
+      ),
+    );
+  }
+}
+
+/// Rand amount: whole rands without cents, otherwise two decimals
+/// (distance pricing produces amounts like R28.08).
+String formatRand(double value) {
+  final cents = (value * 100).round();
+  return cents % 100 == 0
+      ? 'R${cents ~/ 100}'
+      : 'R${(cents / 100).toStringAsFixed(2)}';
+}
+
+/// Driving distance and delivery fee for the address, or why it is missing.
+class _DeliveryQuoteStatus extends StatelessWidget {
+  const _DeliveryQuoteStatus({
+    super.key,
+    required this.quote,
+    required this.subtotal,
+    required this.isLoading,
+    required this.error,
+    required this.addressEntered,
+    required this.pricePerKm,
+    required this.maxDistanceKm,
+    required this.onRetry,
+  });
+
+  final DeliveryQuote? quote;
+  final double subtotal;
+  final bool isLoading;
+  final String? error;
+  final bool addressEntered;
+  final double pricePerKm;
+  final double maxDistanceKm;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = theme.textTheme.bodySmall;
+    final quote = this.quote;
+    final Widget child;
+    if (isLoading) {
+      child = Row(
+        children: [
+          const SizedBox(
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Calculating driving distance…',
+              style: theme.textTheme.bodyMedium,
+            ),
+          ),
+        ],
+      );
+    } else if (error != null) {
+      child = Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.error_outline_rounded, color: theme.colorScheme.error),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              error!,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.error,
+              ),
+            ),
+          ),
+          TextButton(onPressed: onRetry, child: const Text('Try again')),
+        ],
+      );
+    } else if (quote != null) {
+      final fee = quote.feeFor(subtotal);
+      final threshold = quote.freeDeliveryThreshold;
+      final explanation = fee == 0 && threshold != null
+          ? 'Free delivery on orders of ${formatRand(threshold)} or more.'
+          : quote.minimumApplies
+          ? 'Minimum delivery fee ${formatRand(quote.minFee)}.'
+          : '${formatRand(quote.baseFee)} + '
+                '${quote.distanceKm.toStringAsFixed(2)} km × '
+                '${formatRand(quote.pricePerKm)}.';
+      child = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.place_rounded, color: theme.colorScheme.primary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '${quote.distanceKm.toStringAsFixed(2)} km by road • '
+                  'Delivery ${formatRand(fee)}',
+                  style: theme.textTheme.titleSmall,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '$explanation Check the distance looks right for your address.',
+            style: muted,
+          ),
+        ],
+      );
+    } else {
+      child = Text(
+        addressEntered
+            ? 'We price delivery by driving distance once your address is checked.'
+            : 'Enter your address to see the delivery fee '
+                  '(${formatRand(pricePerKm)}/km, up to '
+                  '${maxDistanceKm.toStringAsFixed(0)} km).',
+        style: muted,
+      );
+    }
+    return Semantics(
+      liveRegion: true,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: context.appColors.sunkenSurface,
+          borderRadius: BorderRadius.circular(AppRadii.card),
+        ),
+        child: child,
       ),
     );
   }

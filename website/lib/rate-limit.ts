@@ -13,6 +13,13 @@ export const CHECKOUT_LIMITS = {
   perUser: { limit: 10, windowSeconds: 600 },
 } as const;
 
+// Delivery quotes: each routing call costs money, so the per-user limit only
+// counts calls that reach the routing service (cached quotes are free).
+export const DELIVERY_QUOTE_LIMITS = {
+  perIp: { limit: 120, windowSeconds: 600 },
+  perUser: { limit: 12, windowSeconds: 600 },
+} as const;
+
 /** The caller's IP from Vercel's proxy headers, or null when unknown. */
 export function clientIp(req: Request): string | null {
   const forwarded = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();

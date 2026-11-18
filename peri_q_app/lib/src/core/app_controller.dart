@@ -6,11 +6,13 @@ import 'package:flutter/material.dart';
 import '../models/app_auth_session.dart';
 import '../models/app_preferences.dart';
 import '../models/app_settings.dart';
+import '../models/delivery_quote.dart';
 import '../models/menu_category.dart';
 import '../models/menu_item.dart';
 import '../models/order.dart';
 import '../models/todays_special_settings.dart';
 import '../repositories/auth_repository.dart';
+import '../repositories/delivery_quote_repository.dart';
 import '../repositories/menu_repository.dart';
 import '../repositories/notification_repository.dart';
 import '../repositories/order_repository.dart';
@@ -26,6 +28,7 @@ class AppController extends ChangeNotifier {
     required this._preferencesRepository,
     required this._storeRepository,
     this._notificationRepository = const NoopNotificationRepository(),
+    this._deliveryQuoteRepository = const UnavailableDeliveryQuoteRepository(),
   }) {
     bootstrapFuture = _bootstrap();
   }
@@ -36,6 +39,7 @@ class AppController extends ChangeNotifier {
   final PreferencesRepository _preferencesRepository;
   final StoreRepository _storeRepository;
   final NotificationRepository _notificationRepository;
+  final DeliveryQuoteRepository _deliveryQuoteRepository;
 
   late final Future<void> bootstrapFuture;
 
@@ -59,6 +63,12 @@ class AppController extends ChangeNotifier {
   bool hasReturningSession = false;
   String selectedMenuCategory = 'All';
   ThemeMode themeMode = ThemeMode.dark;
+
+  /// Latest driving-distance quote for the checkout address.
+  DeliveryQuote? deliveryQuote;
+  bool isQuotingDelivery = false;
+  String? deliveryQuoteError;
+  int _deliveryQuoteRevision = 0;
 
   bool isBootstrapping = true;
   String? bootstrapError;
@@ -204,10 +214,73 @@ class AppController extends ChangeNotifier {
 
   double get subtotal => cart.fold<double>(0, (sum, item) => sum + item.total);
 
-  double deliveryFeeFor(OrderType type) =>
-      type == OrderType.delivery ? appSettings.deliveryFee : 0;
+  /// Delivery is priced by driving distance: the fee is known only once the
+  /// server has quoted [address] (or the latest quoted address when null).
+  double deliveryFeeFor(OrderType type, {String? address}) {
+    if (type != OrderType.delivery) return 0;
+    final quote = deliveryQuote;
+    if (quote == null || (address != null && !quote.matches(address))) {
+      return 0;
+    }
+    return quote.feeFor(subtotal);
+  }
 
-  double totalFor(OrderType type) => subtotal + deliveryFeeFor(type);
+  bool hasDeliveryQuoteFor(String address) =>
+      deliveryQuote?.matches(address) ?? false;
+
+  double totalFor(OrderType type, {String? address}) =>
+      _roundRand(subtotal + deliveryFeeFor(type, address: address));
+
+  static double _roundRand(double value) => (value * 100).round() / 100;
+
+  /// Gets the driving distance and delivery fee for [address]. Results for
+  /// an address the customer has since changed are ignored.
+  Future<void> quoteDelivery(String address, {bool force = false}) async {
+    final trimmed = address.trim();
+    final revision = ++_deliveryQuoteRevision;
+    if (trimmed.length < 8) {
+      deliveryQuote = null;
+      isQuotingDelivery = false;
+      deliveryQuoteError = null;
+      notifyListeners();
+      return;
+    }
+    if (!force && (deliveryQuote?.matches(trimmed) ?? false)) {
+      isQuotingDelivery = false;
+      deliveryQuoteError = null;
+      notifyListeners();
+      return;
+    }
+    if (force) deliveryQuote = null;
+    isQuotingDelivery = true;
+    deliveryQuoteError = null;
+    notifyListeners();
+    DeliveryQuote? quote;
+    String? error;
+    try {
+      quote = await _deliveryQuoteRepository.requestQuote(trimmed);
+    } on DeliveryQuoteException catch (failure) {
+      error = failure.message;
+    } catch (_) {
+      error =
+          "We couldn't calculate the delivery fee. Check your connection "
+          'and try again, or choose pickup.';
+    }
+    if (_isDisposed || revision != _deliveryQuoteRevision) return;
+    deliveryQuote = quote;
+    deliveryQuoteError = error;
+    isQuotingDelivery = false;
+    notifyListeners();
+  }
+
+  /// Stops waiting for a quote, e.g. when the customer switches to pickup.
+  void cancelDeliveryQuote() {
+    _deliveryQuoteRevision++;
+    if (!isQuotingDelivery && deliveryQuoteError == null) return;
+    isQuotingDelivery = false;
+    deliveryQuoteError = null;
+    notifyListeners();
+  }
 
   bool get isStoreOpenNow => appSettings.isOpenAt(DateTime.now());
 
@@ -659,6 +732,13 @@ class AppController extends ChangeNotifier {
         (deliveryAddress == null || deliveryAddress.trim().isEmpty)) {
       throw const OrderSubmissionException('Enter a delivery address.');
     }
+    final quote = orderType == OrderType.delivery ? deliveryQuote : null;
+    if (orderType == OrderType.delivery &&
+        (quote == null || !quote.matches(deliveryAddress!))) {
+      throw const OrderSubmissionException(
+        'Wait for the delivery fee to be calculated for this address.',
+      );
+    }
     _pendingOrderRequestId ??=
         '${userId ?? 'user'}-${DateTime.now().microsecondsSinceEpoch}';
     await _persistCheckoutCart();
@@ -669,10 +749,11 @@ class AppController extends ChangeNotifier {
         items: cart.map(_cloneCartItem).toList(),
         orderType: orderType,
         paymentMethod: paymentMethod,
-        totalPrice: totalFor(orderType),
+        totalPrice: totalFor(orderType, address: deliveryAddress),
         estimatedMinutes: orderType == OrderType.delivery ? 45 : 25,
         clientRequestId: _pendingOrderRequestId!,
         deliveryAddress: deliveryAddress,
+        deliveryQuoteId: quote?.quoteId,
       ),
       userId: userId,
     );

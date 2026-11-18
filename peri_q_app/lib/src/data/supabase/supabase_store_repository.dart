@@ -16,6 +16,11 @@ store_open,
 pickup_available,
 delivery_available,
 delivery_fee,
+delivery_base_fee,
+delivery_price_per_km,
+delivery_min_fee,
+delivery_max_distance_km,
+delivery_free_threshold,
 opening_time,
 closing_time,
 todays_special_enabled,
@@ -120,6 +125,7 @@ todays_special_menu_item_id
     return error.code == '42703' ||
         error.message.contains('opening_time') ||
         error.message.contains('closing_time') ||
+        error.message.contains('delivery_') ||
         error.message.contains('todays_special_');
   }
 }

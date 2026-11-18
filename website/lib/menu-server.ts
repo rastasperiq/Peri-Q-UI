@@ -59,6 +59,11 @@ export async function fetchPublicMenuSnapshot(): Promise<PublicMenuSnapshot> {
           pickupAvailable: (s["pickup_available"] as boolean) ?? true,
           deliveryAvailable: (s["delivery_available"] as boolean) ?? true,
           deliveryFee: Number(s["delivery_fee"] ?? 30),
+          deliveryBaseFee: Number(s["delivery_base_fee"] ?? 15),
+          deliveryPricePerKm: Number(s["delivery_price_per_km"] ?? 4),
+          deliveryMinFee: Number(s["delivery_min_fee"] ?? 20),
+          deliveryMaxDistanceKm: Number(s["delivery_max_distance_km"] ?? 15),
+          deliveryFreeThreshold: s["delivery_free_threshold"] == null ? null : Number(s["delivery_free_threshold"]),
           openingTime: String(s["opening_time"] ?? "10:00"),
           closingTime: String(s["closing_time"] ?? "21:00"),
         }

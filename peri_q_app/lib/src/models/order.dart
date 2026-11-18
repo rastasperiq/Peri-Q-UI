@@ -147,6 +147,7 @@ class OrderDraft {
     required this.estimatedMinutes,
     required this.clientRequestId,
     this.deliveryAddress,
+    this.deliveryQuoteId,
   });
 
   final String customerName;
@@ -159,6 +160,9 @@ class OrderDraft {
   final String clientRequestId;
   final String? deliveryAddress;
 
+  /// Server quote that prices this delivery by driving distance.
+  final String? deliveryQuoteId;
+
   Map<String, dynamic> toJson() {
     return {
       'customerName': customerName,
@@ -170,6 +174,7 @@ class OrderDraft {
       'estimatedMinutes': estimatedMinutes,
       'clientRequestId': clientRequestId,
       'deliveryAddress': deliveryAddress,
+      'deliveryQuoteId': deliveryQuoteId,
     };
   }
 }

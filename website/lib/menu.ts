@@ -26,9 +26,29 @@ export type AppSettings = {
   storeOpen: boolean;
   pickupAvailable: boolean;
   deliveryAvailable: boolean;
+  /** Legacy flat fee; checkout now prices delivery by driving distance. */
   deliveryFee: number;
+  deliveryBaseFee: number;
+  deliveryPricePerKm: number;
+  deliveryMinFee: number;
+  deliveryMaxDistanceKm: number;
+  deliveryFreeThreshold: number | null;
   openingTime: string; // HH:MM
   closingTime: string; // HH:MM
+};
+
+export const DEFAULT_APP_SETTINGS: AppSettings = {
+  storeOpen: true,
+  pickupAvailable: true,
+  deliveryAvailable: true,
+  deliveryFee: 30,
+  deliveryBaseFee: 15,
+  deliveryPricePerKm: 4,
+  deliveryMinFee: 20,
+  deliveryMaxDistanceKm: 15,
+  deliveryFreeThreshold: null,
+  openingTime: "10:00",
+  closingTime: "21:00",
 };
 
 export function imageUrlFor(path: unknown, supabaseUrl?: string): string {
@@ -47,13 +67,13 @@ export function imageUrlFor(path: unknown, supabaseUrl?: string): string {
 export async function fetchMenu(): Promise<{ items: MenuItem[]; categories: MenuCategory[]; appSettings: AppSettings }> {
   const cfg = readPublicSupabaseConfig();
   if (!cfg) {
-    return { items: [], categories: [], appSettings: { storeOpen: true, pickupAvailable: true, deliveryAvailable: true, deliveryFee: 30, openingTime: "10:00", closingTime: "21:00" } };
+    return { items: [], categories: [], appSettings: DEFAULT_APP_SETTINGS };
   }
   const supa = createBrowserClient();
   const [itemsRes, catsRes, settingsRes] = await Promise.all([
     supa.from("menu_items").select("*").order("category").order("name"),
     supa.from("menu_categories").select("*").order("sort_order").order("name"),
-    supa.from("app_settings").select("store_open,pickup_available,delivery_available,delivery_fee,opening_time,closing_time").eq("id", "default").maybeSingle(),
+    supa.from("app_settings").select("store_open,pickup_available,delivery_available,delivery_fee,delivery_base_fee,delivery_price_per_km,delivery_min_fee,delivery_max_distance_km,delivery_free_threshold,opening_time,closing_time").eq("id", "default").maybeSingle(),
   ]);
   for (const result of [itemsRes, catsRes, settingsRes]) {
     if (result.error) throw result.error;
@@ -69,10 +89,15 @@ export async function fetchMenu(): Promise<{ items: MenuItem[]; categories: Menu
         pickupAvailable: (s["pickup_available"] as boolean) ?? true,
         deliveryAvailable: (s["delivery_available"] as boolean) ?? true,
         deliveryFee: Number(s["delivery_fee"] ?? 30),
+        deliveryBaseFee: Number(s["delivery_base_fee"] ?? 15),
+        deliveryPricePerKm: Number(s["delivery_price_per_km"] ?? 4),
+        deliveryMinFee: Number(s["delivery_min_fee"] ?? 20),
+        deliveryMaxDistanceKm: Number(s["delivery_max_distance_km"] ?? 15),
+        deliveryFreeThreshold: s["delivery_free_threshold"] == null ? null : Number(s["delivery_free_threshold"]),
         openingTime: (s["opening_time"] as string) ?? "10:00",
         closingTime: (s["closing_time"] as string) ?? "21:00",
       }
-    : { storeOpen: true, pickupAvailable: true, deliveryAvailable: true, deliveryFee: 30, openingTime: "10:00", closingTime: "21:00" };
+    : DEFAULT_APP_SETTINGS;
 
   return { items, categories, appSettings };
 }
