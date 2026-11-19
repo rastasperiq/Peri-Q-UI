@@ -8,6 +8,13 @@ import { createBrowserClient, isSupabaseConfigured } from "@/lib/supabase";
 import { registerCustomer, requestPasswordReset, saveCustomerProfile, setCustomerPassword, signInCustomer, signOutCustomer } from "@/lib/customer-account";
 import { PolicyConsent, PrivacyNotice } from "@/components/policy-consent";
 import { PrivacyPanel } from "@/components/privacy-panel";
+import { useAdminAccess } from "@/lib/admin/use-admin";
+
+function AdminDashboardLink() {
+  const { state } = useAdminAccess();
+  if (state !== "admin") return null;
+  return <Link href="/admin/" className="button button-primary mt-6 flex justify-center">Open the owner dashboard</Link>;
+}
 
 type Mode = "signin" | "signup" | "reset" | "password";
 type OrderSummary = { id: string; order_number: number; created_at: string; status: string; total_price: number };
@@ -153,6 +160,7 @@ export default function AccountClient() {
               <button disabled={busy} className="button button-primary justify-center disabled:opacity-50">Update password</button>
             </form> : <button onClick={() => changeMode("password")} className="mt-6 text-sm underline">Change password</button>}
             <button disabled={busy} onClick={() => void perform(async () => { await signOutCustomer(); clear(); setName(""); setPhone(""); setOrders([]); setMode("signin"); })} className="mt-6 ml-6 text-sm font-bold underline">Sign out</button>
+            <AdminDashboardLink />
           </div>
           <div>
             <h2 className="font-display text-2xl font-bold uppercase">Your orders</h2>
