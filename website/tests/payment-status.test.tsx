@@ -67,6 +67,9 @@ describe("Authoritative payment return status", () => {
     expect(appReturnLink("x", "cancel", "Android", "https://rastasperiq.co.za/payment/x/?noapp=1")).toContain(
       "S.browser_fallback_url=https%3A%2F%2Frastasperiq.co.za%2Fpayment%2Fx%2F%3Fnoapp%3D1;end",
     );
+    expect(appReturnLink("x", "success", "Android", undefined, "za.co.rastasperiq.ordering.test")).toBe(
+      "intent://payment-return?order=x&result=success#Intent;scheme=rastasperiq;package=za.co.rastasperiq.ordering.test;end",
+    );
   });
   it("does not loop back to the app for app versions without the return link", async () => {
     const assign = vi.spyOn(window.location, "assign").mockImplementation(() => {});

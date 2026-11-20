@@ -6,8 +6,9 @@ import Link from "next/link";
 import { CreditCard, ArrowRight, CheckCircle2, XCircle } from "lucide-react";
 import { createBrowserClient } from "@/lib/supabase";
 import { useCart } from "@/lib/cart";
+import { LIVE_APP_PACKAGE } from "@/lib/app-packages";
 
-export default function PaymentStatus({ id }: { id: string }) {
+export default function PaymentStatus({ id, appPackage = LIVE_APP_PACKAGE }: { id: string; appPackage?: string }) {
   const [message, setMessage] = useState("Checking payment with the restaurant…");
   const [mobile, setMobile] = useState(false);
   const [mobileResult, setMobileResult] = useState<MobileResult>("success");
@@ -42,7 +43,7 @@ export default function PaymentStatus({ id }: { id: string }) {
       setMessage(MOBILE_MESSAGES[result]);
       const timer = window.setTimeout(() => {
         try {
-          window.location.assign(appReturnLink(id, result, navigator.userAgent, noAppFallback(result)));
+          window.location.assign(appReturnLink(id, result, navigator.userAgent, noAppFallback(result), appPackage));
         } catch { /* The button below still works. */ }
       }, 500);
       return () => window.clearTimeout(timer);
@@ -91,7 +92,7 @@ export default function PaymentStatus({ id }: { id: string }) {
       document.removeEventListener("visibilitychange", resume);
       window.removeEventListener("online", resume);
     };
-  }, [id]);
+  }, [id, appPackage]);
 
   if (mobile) {
     const success = mobileResult === "success";
@@ -108,7 +109,7 @@ export default function PaymentStatus({ id }: { id: string }) {
           </h1>
           <p role="status" aria-live="polite" className="mt-4 text-sm leading-6 text-smoke">{message}</p>
           <a
-            href={appReturnLink(id, mobileResult, typeof navigator === "undefined" ? "" : navigator.userAgent, noAppFallback(mobileResult))}
+            href={appReturnLink(id, mobileResult, typeof navigator === "undefined" ? "" : navigator.userAgent, noAppFallback(mobileResult), appPackage)}
             className="button button-primary mt-7 w-full"
           >
             Return to the app
@@ -152,11 +153,11 @@ function mobileResultFrom(value: string | null): MobileResult {
  * elsewhere the plain app scheme is used. The result is only a hint for the
  * app: payment is confirmed from the database.
  */
-export function appReturnLink(orderId: string, result: MobileResult, userAgent: string, fallbackUrl?: string): string {
+export function appReturnLink(orderId: string, result: MobileResult, userAgent: string, fallbackUrl?: string, appPackage: string = LIVE_APP_PACKAGE): string {
   const query = `order=${encodeURIComponent(orderId)}&result=${result}`;
   if (/android/i.test(userAgent)) {
     const fallback = fallbackUrl ? `S.browser_fallback_url=${encodeURIComponent(fallbackUrl)};` : "";
-    return `intent://payment-return?${query}#Intent;scheme=rastasperiq;package=za.co.rastasperiq.ordering;${fallback}end`;
+    return `intent://payment-return?${query}#Intent;scheme=rastasperiq;package=${appPackage};${fallback}end`;
   }
   return `rastasperiq://payment-return?${query}`;
 }
