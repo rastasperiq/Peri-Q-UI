@@ -59,7 +59,7 @@ export default function PrivacyPolicyPage() {
               uses, why it is needed, and the choices available to you.
             </p>
             <div className="mt-8 inline-flex items-center rounded-full border border-white/12 bg-white/7 px-4 py-2 text-xs font-bold text-white/70">
-              Effective date: 20 July 2026
+              Effective date: 25 November 2026
             </div>
           </div>
         </div>
@@ -153,11 +153,19 @@ export default function PrivacyPolicyPage() {
             a permanent account to place a guest order.
           </p>
 
+          <h3>Notifications</h3>
+          <p>
+            If you allow notifications, the app uses Google Firebase Cloud Messaging. We
+            store a notification token for your device and an installation identifier so
+            we can tell you when your order status changes. You can switch notifications
+            off at any time in your device settings.
+          </p>
+
           <h3>Information we do not collect through the app</h3>
           <p>
             The app does not include advertising or analytics SDKs and does not request
             precise location, contacts, SMS, or call-log access. It does not process card
-            details, use Firebase Cloud Messaging, or include a third-party crash-reporting SDK.
+            details or include a third-party crash-reporting SDK.
           </p>
 
           <h2 id="purposes">4. How we use information</h2>
@@ -168,6 +176,7 @@ export default function PrivacyPolicyPage() {
             <li>Deliver orders to the address a customer provides.</li>
             <li>Review historical payment records and reconcile card payment status.</li>
             <li>Show order status and order history.</li>
+            <li>Send order-status notifications, if you allow them on your device.</li>
             <li>Prevent misuse, troubleshoot problems, and provide customer support.</li>
           </ul>
 
@@ -180,6 +189,10 @@ export default function PrivacyPolicyPage() {
             <li>
               <strong>Supabase</strong> provides authentication, PostgreSQL database,
               realtime updates, and protected file storage.
+            </li>
+            <li>
+              <strong>Google Firebase Cloud Messaging</strong> delivers app notifications.
+              Restaurant staff notifications include the customer&apos;s name and order total.
             </li>
             <li>
               <strong>Authorised store staff and delivery personnel</strong> can access
@@ -258,9 +271,9 @@ export default function PrivacyPolicyPage() {
 
           <h2 id="international">11. International processing</h2>
           <p>
-            Because Supabase hosts the app&apos;s backend in Ireland, information may be
-            processed outside South Africa. We use the provider&apos;s security controls and
-            contractual protections as part of operating the service.
+            Because Supabase hosts the app&apos;s backend in Ireland and Google delivers
+            app notifications, information may be processed outside South Africa. We use
+            the providers&apos; security controls and contractual protections as part of operating the service.
           </p>
 
           <h2 id="changes">12. Changes to this policy</h2>
