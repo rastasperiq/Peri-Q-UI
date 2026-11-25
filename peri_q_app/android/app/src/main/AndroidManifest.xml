@@ -45,7 +45,7 @@
                 <category android:name="android.intent.category.DEFAULT"/>
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data
-                    android:scheme="rastasperiq"
+                    android:scheme="${authScheme}"
                     android:host="reset-password"/>
             </intent-filter>
             <!-- Return from the secure card payment page. singleTask (above)

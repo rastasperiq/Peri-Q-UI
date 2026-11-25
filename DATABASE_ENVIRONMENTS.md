@@ -123,9 +123,8 @@ are needed there.
   to `website/.env.local`, keep `APP_ENVIRONMENT=test`, and fill in TEST values
   only. If a LIVE URL ends up there, the website refuses payments and writes.
 - **App:** build with `release-config.json` for LIVE and
-  `release-config.test.json` for TEST. Both builds currently share the
-  package name `za.co.rastasperiq.ordering`, so installing one replaces the
-  other on a phone (see "Outstanding" below).
+  `release-config.test.json` for TEST. They are separate apps (flavours `live`
+  and `staging`; the TEST package ends in `.test`), so both can be on one phone.
 - **Database tool:** set only the URL you need, in a fresh terminal, and close
   the terminal when done:
 
@@ -175,7 +174,7 @@ Its safety rules (unit-tested in `guard.test.mjs`, run with `node --test guard.t
    URL `https://staging.rastasperiq.co.za`; redirect URLs
    `https://staging.rastasperiq.co.za/auth/callback/`,
    `https://staging.rastasperiq.co.za/auth/callback/?recovery=1`,
-   `http://localhost:3000/auth/callback/`, `rastasperiq://reset-password`.
+   `http://localhost:3000/auth/callback/`, `rastasperiq-test://reset-password`.
 3. **Schema and marker:** set `PERIQ_TEST_DB_URL` (Supabase → Connect →
    Session pooler) and run `node db.mjs init-test`. It refuses any project
    that already has tables.
@@ -260,9 +259,6 @@ At go-live, run `mark-live … --allow-test-payments false` and set
 
 ## Outstanding
 
-- TEST app builds share the LIVE package name, so they replace the LIVE app
-  on a phone. Add an Android product flavour with an `applicationIdSuffix`
-  (for example `.test`) before giving TEST builds to anyone else.
 - Push notifications in TEST need their own Firebase credentials on the TEST
   Supabase project.
 - Website unit tests must run with `NODE_OPTIONS=--no-experimental-webstorage`
