@@ -34,8 +34,10 @@ describe("Shared customer accounts", () => {
   });
   it("clears cached customer information on sign-out", async () => {
     localStorage.setItem("peri_q_customer_v1", "private details");
+    sessionStorage.setItem("peri_q_customer_v1", "private details");
     await signOutCustomer();
     expect(localStorage.getItem("peri_q_customer_v1")).toBeNull();
+    expect(sessionStorage.getItem("peri_q_customer_v1")).toBeNull();
     expect(api.signOut).toHaveBeenCalledWith({ scope: "local" });
   });
   it("exchanges callback codes and rejects expired/incomplete links", async () => {
@@ -44,8 +46,13 @@ describe("Shared customer accounts", () => {
     await expect(completeAuthCallback("https://rastasperiq.co.za/auth/callback/?error=expired")).rejects.toThrow("expired");
     await expect(completeAuthCallback("https://rastasperiq.co.za/auth/callback/")).rejects.toThrow("incomplete");
   });
-  it("restores an implicit recovery session from the full token pair", async () => {
-    expect(await completeAuthCallback("https://rastasperiq.co.za/auth/callback/#access_token=test-access&refresh_token=test-refresh&type=recovery")).toBe(true);
-    expect(api.setSession).toHaveBeenCalledWith({ access_token: "test-access", refresh_token: "test-refresh" });
+  it("never signs in with a token pair supplied in the link (SA-004)", async () => {
+    await expect(completeAuthCallback("https://rastasperiq.co.za/auth/callback/#access_token=attacker-access&refresh_token=attacker-refresh&type=recovery"))
+      .rejects.toThrow("new link");
+    expect(api.setSession).not.toHaveBeenCalled();
+  });
+  it("explains a link opened without this browser's sign-in code verifier", async () => {
+    api.exchangeCodeForSession.mockResolvedValueOnce({ error: new Error("invalid flow state, no valid flow state found") });
+    await expect(completeAuthCallback("https://rastasperiq.co.za/auth/callback/?code=other-device")).rejects.toThrow("same device");
   });
 });

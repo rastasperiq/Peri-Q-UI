@@ -1,6 +1,16 @@
 import { createBrowserClient } from "./supabase";
 import { signupAcceptanceMetadata } from "./policy-consent";
 
+/** Browser key for the checkout form's name, phone and address. */
+export const CUSTOMER_DRAFT_KEY = "peri_q_customer_v1";
+
+export function clearSavedCheckoutDetails() {
+  try {
+    sessionStorage.removeItem(CUSTOMER_DRAFT_KEY);
+    localStorage.removeItem(CUSTOMER_DRAFT_KEY);
+  } catch {}
+}
+
 export type CustomerProfile = { id: string; full_name: string | null; phone: string | null };
 
 export async function fetchCustomerProfile(userId: string): Promise<CustomerProfile | null> {
@@ -46,7 +56,7 @@ export async function signInCustomer(email: string, password: string) {
 export async function signOutCustomer() {
   const { error } = await createBrowserClient().auth.signOut({ scope: "local" });
   if (error) throw error;
-  localStorage.removeItem("peri_q_customer_v1");
+  clearSavedCheckoutDetails();
 }
 
 export async function requestPasswordReset(email: string) {
@@ -66,19 +76,19 @@ export async function completeAuthCallback(url: string): Promise<boolean> {
   const parsed = new URL(url);
   const hash = new URLSearchParams(parsed.hash.slice(1));
   if (parsed.searchParams.has("error") || hash.has("error")) throw new Error("This link is invalid or has expired. Request a new one.");
-  const supa = createBrowserClient();
-  const code = parsed.searchParams.get("code");
-  if (code) {
-    const { error } = await supa.auth.exchangeCodeForSession(code);
-    if (error) throw error;
-  } else {
-    const access = hash.get("access_token");
-    const refresh = hash.get("refresh_token");
-    if (!access || !refresh) throw new Error("This link is incomplete. Request a new one.");
-    const { error } = await supa.auth.setSession({ access_token: access, refresh_token: refresh });
-    if (error) throw error;
+  // Only a PKCE code is accepted: exchanging it needs the verifier this browser
+  // stored when it asked for the e-mail, so a link carrying someone else's
+  // tokens can never swap in their session (audit SA-004).
+  if (hash.has("access_token") || hash.has("refresh_token")) {
+    throw new Error("This sign-in link is no longer supported. Request a new link from this device.");
   }
-  return parsed.searchParams.get("recovery") === "1" || hash.get("type") === "recovery";
+  const code = parsed.searchParams.get("code");
+  if (!code) throw new Error("This link is incomplete. Request a new one.");
+  const { error } = await createBrowserClient().auth.exchangeCodeForSession(code);
+  if (error) {
+    throw new Error("This link could not sign you in here. Open it on the same device and browser where you asked for it, or request a new link. If you were confirming your email, it is confirmed: sign in.");
+  }
+  return parsed.searchParams.get("recovery") === "1";
 }
 
 export type PrivacyRequestType = "access" | "correction" | "deletion" | "objection" | "other";
@@ -134,5 +144,5 @@ export async function deleteMyAccount() {
   if (error) throw new Error("Could not delete your account. Please try again or contact us.");
   // The session belongs to an account that no longer exists.
   await supa.auth.signOut({ scope: "local" }).catch(() => undefined);
-  localStorage.removeItem("peri_q_customer_v1");
+  clearSavedCheckoutDetails();
 }

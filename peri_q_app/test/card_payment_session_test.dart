@@ -77,6 +77,9 @@ void main() {
         'https://rastasperiq.co.za/payment/abc/?checkout=paid',
         'https://rastasperiq.co.za/order/abc/?checkout=success',
         'http://rastasperiq.co.za/payment/abc/?checkout=success',
+        'https://rastasperiq.co.za.evil.example/payment/abc/?checkout=success',
+        'https://evil.example/payment/abc/?checkout=success',
+        'https://user@rastasperiq.co.za/payment/abc/?checkout=success',
       ]) {
         expect(
           CardPaymentSession.parseHostedReturn(Uri.parse(link), orderId: 'abc'),
@@ -85,6 +88,52 @@ void main() {
         );
       }
     });
+  });
+
+  test(
+    'only HTTPS pages without credentials may open in the payment screen',
+    () {
+      expect(
+        CardPaymentSession.isSecurePage(
+          Uri.parse('https://c.yoco.com/checkout/1'),
+        ),
+        isTrue,
+      );
+      for (final link in [
+        'http://c.yoco.com/checkout/1',
+        'javascript:alert(1)',
+        'intent://pay#Intent;end',
+        'https://user:pass@c.yoco.com/checkout/1',
+      ]) {
+        expect(
+          CardPaymentSession.isSecurePage(Uri.parse(link)),
+          isFalse,
+          reason: link,
+        );
+      }
+    },
+  );
+
+  test('a TEST build accepts returns only from its own site', () {
+    final staging = Uri.parse(
+      'https://staging.rastasperiq.co.za/payment/abc/?checkout=success',
+    );
+    expect(
+      CardPaymentSession.parseHostedReturn(
+        staging,
+        orderId: 'abc',
+        site: 'staging.rastasperiq.co.za',
+      ),
+      isNotNull,
+    );
+    expect(
+      CardPaymentSession.parseHostedReturn(
+        staging,
+        orderId: 'abc',
+        site: 'rastasperiq.co.za',
+      ),
+      isNull,
+    );
   });
 
   group('Payment session', () {

@@ -16,7 +16,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
-import { LIVE_PROJECT_REF, assertCommandAllowed, checkTarget, projectRefFromDbUrl } from "./guard.mjs";
+import { LIVE_PROJECT_REF, assertCommandAllowed, assertNoTlsOverride, checkTarget, projectRefFromDbUrl, tlsOptions } from "./guard.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..", "..");
@@ -66,11 +66,11 @@ function dbUrlFor(env) {
 }
 
 function sslOptions() {
+  // Supabase signs with its own CA: download it (Database settings → SSL) and
+  // set PERIQ_DB_CA_FILE. Without it the tool refuses to connect.
   const caFile = (process.env.PERIQ_DB_CA_FILE ?? "").trim();
-  if (caFile) return { ca: readFileSync(caFile, "utf8"), rejectUnauthorized: true };
-  // Supabase signs with its own CA. Download it (Database settings → SSL) and
-  // set PERIQ_DB_CA_FILE to verify the server certificate as well.
-  return { rejectUnauthorized: false };
+  if (!caFile || !existsSync(caFile)) return tlsOptions(null);
+  return tlsOptions(readFileSync(caFile, "utf8"));
 }
 
 async function connect(env, { readOnly = false } = {}) {
@@ -84,6 +84,7 @@ async function connect(env, { readOnly = false } = {}) {
   if (env === "live" && ref !== LIVE_PROJECT_REF) {
     throw new Error(`PERIQ_LIVE_DB_URL must point at the production project (${LIVE_PROJECT_REF}). Refusing to connect.`);
   }
+  assertNoTlsOverride(url);
   const client = new pg.Client({ connectionString: url, ssl: sslOptions(), application_name: `periq-db-${env}` });
   await client.connect();
   if (readOnly) await client.query("set session characteristics as transaction read only");

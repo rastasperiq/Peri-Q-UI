@@ -738,6 +738,13 @@ void main() {
       );
     });
 
+    test('the TEST app has its own password recovery link', () {
+      expect(AuthDeepLinks.schemeFor('live'), 'rastasperiq');
+      expect(AuthDeepLinks.schemeFor(null), 'rastasperiq');
+      expect(AuthDeepLinks.schemeFor('staging'), 'rastasperiq-test');
+      expect(AuthDeepLinks.resetPasswordUrl, 'rastasperiq://reset-password');
+    });
+
     testWidgets('updates the password and returns the user to sign in', (
       tester,
     ) async {

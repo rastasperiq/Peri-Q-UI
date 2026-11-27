@@ -30,6 +30,8 @@ export function createBrowserClient() {
       persistSession: true,
       autoRefreshToken: true,
       detectSessionInUrl: false,
+      // Sign-up and reset links return a code tied to this browser (SA-004).
+      flowType: "pkce",
     },
   });
   return browserClient;

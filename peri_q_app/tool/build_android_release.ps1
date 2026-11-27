@@ -15,13 +15,15 @@ $pubspecPath = Join-Path $projectRoot 'pubspec.yaml'
 $signingConfigPath = Join-Path $projectRoot 'android\key.properties'
 $liveSupabaseRef = 'ovqvytkhznhmlxsfaqwh'
 $isTest = $Environment -eq 'test'
+# Android refuses flavour names that start with "test".
+$flavor = if ($isTest) { 'staging' } else { 'live' }
 
 if ($isTest) {
     $releaseConfigPath = Join-Path $projectRoot 'release-config.test.json'
     if (-not (Test-Path -LiteralPath $releaseConfigPath)) {
         throw "Missing $releaseConfigPath. Copy release-config.test.example.json to release-config.test.json and fill in the TEST Supabase URL and publishable key."
     }
-    $testFirebasePath = Join-Path $projectRoot 'android\app\src\test\google-services.json'
+    $testFirebasePath = Join-Path $projectRoot 'android\app\src\staging\google-services.json'
     if (-not (Test-Path -LiteralPath $testFirebasePath)) {
         throw "Missing $testFirebasePath. In Firebase (project rastas-peri-q) add an Android app with package za.co.rastasperiq.ordering.test, download its google-services.json and save it there."
     }
@@ -76,6 +78,15 @@ if ($isTest) {
         $defines[$name] = $value
     }
 }
+else {
+    # The Play Store app must never ship with an old or TEST database.
+    if ($supabaseUrl.Trim().TrimEnd('/') -ne "https://$liveSupabaseRef.supabase.co") {
+        throw "release-config.json must use the LIVE Supabase project (https://$liveSupabaseRef.supabase.co), not $supabaseUrl."
+    }
+    if ([string]$releaseConfig.APP_ENVIRONMENT -eq 'test') {
+        throw 'release-config.json must not contain "APP_ENVIRONMENT": "test".'
+    }
+}
 
 $versionLine = Select-String -LiteralPath $pubspecPath -Pattern '^version:\s*(?<name>[^+]+)\+(?<code>\d+)\s*$' |
     Select-Object -First 1
@@ -99,7 +110,7 @@ else {
 $commonArguments = @(
     '--release',
     '--no-pub',
-    "--flavor=$Environment",
+    "--flavor=$flavor",
     '--obfuscate',
     "--split-debug-info=$symbolsPath"
 )
@@ -116,7 +127,7 @@ try {
         if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
         }
-        Copy-Item -LiteralPath (Join-Path $projectRoot "build\app\outputs\flutter-apk\app-$Environment-release.apk") `
+        Copy-Item -LiteralPath (Join-Path $projectRoot "build\app\outputs\flutter-apk\app-$flavor-release.apk") `
             -Destination (Join-Path $releaseOutputPath "$releaseStem.apk") -Force
     }
     if ($Target -in @('appbundle', 'all')) {
@@ -124,7 +135,7 @@ try {
         if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
         }
-        Copy-Item -LiteralPath (Join-Path $projectRoot "build\app\outputs\bundle\${Environment}Release\app-$Environment-release.aab") `
+        Copy-Item -LiteralPath (Join-Path $projectRoot "build\app\outputs\bundle\${flavor}Release\app-$flavor-release.aab") `
             -Destination (Join-Path $releaseOutputPath "$releaseStem.aab") -Force
     }
     Write-Host "Built $Environment output in $releaseOutputPath"

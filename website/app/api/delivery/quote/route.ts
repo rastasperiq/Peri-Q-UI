@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createServiceClient, readServerSupabaseConfig } from "@/lib/supabase";
 import { environmentBlock } from "@/lib/environment-guard";
-import { allowRequest, clientIp, DELIVERY_QUOTE_LIMITS, ipBucket } from "@/lib/rate-limit";
+import { checkRateLimit, clientIp, DELIVERY_QUOTE_LIMITS, ipBucket, type LimitResult } from "@/lib/rate-limit";
 import { computeDrivingRoute, quoteFromRow, routingDestination, type DeliveryQuoteError } from "@/lib/delivery";
 
 export const runtime = "nodejs";
@@ -9,6 +9,14 @@ export const dynamic = "force-dynamic";
 
 function fail(status: number, body: DeliveryQuoteError, headers?: Record<string, string>) {
   return NextResponse.json(body, { status, headers: { "Cache-Control": "no-store", ...headers } });
+}
+
+/** 429 when the quota is used up; retryable 503 when it could not be checked. */
+function quoteLimited(result: Exclude<LimitResult, "allowed">, retryAfterSeconds: number) {
+  if (result === "unavailable") {
+    return fail(503, { error: "Delivery pricing is briefly unavailable. Please try again in a minute.", code: "limiter_unavailable" }, { "Retry-After": "30" });
+  }
+  return fail(429, { error: "Too many address checks. Please wait a few minutes and try again.", code: "rate_limited" }, { "Retry-After": String(retryAfterSeconds) });
 }
 
 /** Server-side Google Routes key. Never NEXT_PUBLIC_: it must stay on the server. */
@@ -43,9 +51,8 @@ export async function POST(req: Request) {
   const svc = createServiceClient();
   const ip = clientIp(req);
   const serviceKey = readServerSupabaseConfig()!.serviceRoleKey;
-  if (ip && !(await allowRequest(svc, { bucket: ipBucket("delivery-quote", ip, serviceKey), ...DELIVERY_QUOTE_LIMITS.perIp }))) {
-    return fail(429, { error: "Too many address checks. Please wait a few minutes and try again.", code: "rate_limited" }, { "Retry-After": String(DELIVERY_QUOTE_LIMITS.perIp.windowSeconds) });
-  }
+  const ipLimit = ip ? await checkRateLimit(svc, { bucket: ipBucket("delivery-quote", ip, serviceKey), ...DELIVERY_QUOTE_LIMITS.perIp }) : "allowed";
+  if (ipLimit !== "allowed") return quoteLimited(ipLimit, DELIVERY_QUOTE_LIMITS.perIp.windowSeconds);
   const { data: auth, error: authError } = await svc.auth.getUser(token);
   if (authError || !auth.user) return fail(401, { error: "Your session has expired. Please refresh and try again.", code: "unauthorized" });
   const userId = auth.user.id;
@@ -71,9 +78,8 @@ export async function POST(req: Request) {
     console.error("GOOGLE_ROUTES_API_KEY is not set");
     return fail(503, { error: "Delivery pricing is temporarily unavailable. Please try again later or choose pickup.", code: "routing_not_configured" });
   }
-  if (!(await allowRequest(svc, { bucket: `delivery-quote:user:${userId}`, ...DELIVERY_QUOTE_LIMITS.perUser }))) {
-    return fail(429, { error: "Too many address checks. Please wait a few minutes and try again.", code: "rate_limited" }, { "Retry-After": String(DELIVERY_QUOTE_LIMITS.perUser.windowSeconds) });
-  }
+  const userLimit = await checkRateLimit(svc, { bucket: `delivery-quote:user:${userId}`, ...DELIVERY_QUOTE_LIMITS.perUser });
+  if (userLimit !== "allowed") return quoteLimited(userLimit, DELIVERY_QUOTE_LIMITS.perUser.windowSeconds);
 
   const route = await computeDrivingRoute(String(settings.restaurant_address), routingDestination(address), key);
   if (!route.ok) {

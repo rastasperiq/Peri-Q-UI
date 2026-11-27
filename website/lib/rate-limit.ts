@@ -35,20 +35,26 @@ export function ipBucket(prefix: string, ip: string, secret: string): string {
   return `${prefix}:ip:${digest}`;
 }
 
+/** "unavailable" means the quota could not be checked; callers must not proceed. */
+export type LimitResult = "allowed" | "limited" | "unavailable";
+
 /**
- * Counts one request against the limit. Returns false only when the limit is
- * exceeded. If the limiter itself fails, the request is allowed: payments must
- * not stop because a defence-in-depth check is unavailable.
+ * Counts one request against the limit. Paid work (Yoco checkouts, Google
+ * routing calls) may only go ahead on a positive "allowed": a limiter error,
+ * timeout or unexpected reply is "unavailable", so the route answers with a
+ * retryable 503 instead of spending money without a quota (audit SA-003).
  */
-export async function allowRequest(svc: SupabaseClient, { bucket, limit, windowSeconds }: RateLimit): Promise<boolean> {
+export async function checkRateLimit(svc: SupabaseClient, { bucket, limit, windowSeconds }: RateLimit): Promise<LimitResult> {
   try {
     const { data, error } = await svc.rpc("consume_rate_limit", {
       p_bucket: bucket, p_limit: limit, p_window_seconds: windowSeconds,
     });
     if (error) throw error;
-    return data !== false;
+    if (data === true) return "allowed";
+    if (data === false) return "limited";
+    throw new Error("Unexpected rate limiter reply");
   } catch {
     console.error("Rate limiter unavailable", { bucket: bucket.split(":").slice(0, 2).join(":") });
-    return true;
+    return "unavailable";
   }
 }

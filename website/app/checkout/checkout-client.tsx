@@ -10,6 +10,7 @@ import { createBrowserClient, isSupabaseConfigured } from "@/lib/supabase";
 import { useCustomerAuth } from "@/lib/customer-auth";
 import { siteConfig } from "@/lib/site";
 import { recordCheckoutAcceptance } from "@/lib/policy-consent";
+import { CUSTOMER_DRAFT_KEY } from "@/lib/customer-account";
 import { deliveryFeeFor, normalizeDeliveryAddress, roundRand, type DeliveryQuote, type DeliveryQuoteError } from "@/lib/delivery";
 import { PolicyConsent, PrivacyNotice } from "@/components/policy-consent";
 
@@ -67,9 +68,11 @@ export default function CheckoutClient() {
       if (!appSettings.pickupAvailable && appSettings.deliveryAvailable) setOrderType("delivery");
     }).catch(() => setError("Could not load store settings. Please refresh and try again.")).finally(() => setLoadingSettings(false));
 
-    // Load saved customer details from localStorage (mirrors mobile SharedPreferences)
+    // Checkout details last only for this tab (audit SA-015): a shared or
+    // public computer keeps no name, phone or address once the tab closes.
     try {
-      const saved = localStorage.getItem("peri_q_customer_v1");
+      localStorage.removeItem(CUSTOMER_DRAFT_KEY); // older builds kept them indefinitely
+      const saved = sessionStorage.getItem(CUSTOMER_DRAFT_KEY);
       if (saved) {
         const parsed = JSON.parse(saved) as { name?: string; phone?: string; address?: string; orderType?: OrderType; paymentMethod?: string };
         if (parsed.name) setName(parsed.name);
@@ -83,7 +86,7 @@ export default function CheckoutClient() {
 
   useEffect(() => {
     try {
-      localStorage.setItem("peri_q_customer_v1", JSON.stringify({ name, phone, address, orderType, paymentMethod }));
+      sessionStorage.setItem(CUSTOMER_DRAFT_KEY, JSON.stringify({ name, phone, address, orderType }));
     } catch {}
   }, [name, phone, address, orderType]);
 

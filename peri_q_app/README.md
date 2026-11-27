@@ -9,9 +9,9 @@ The Android project has two flavours that install side by side:
 | Flavour | App name | Package | Talks to |
 |---|---|---|---|
 | `live` | RastasperiQ | `za.co.rastasperiq.ordering` | LIVE database, rastasperiq.co.za, real payments |
-| `test` | RastasperiQ TEST | `za.co.rastasperiq.ordering.test` | TEST database, staging.rastasperiq.co.za, Yoco test mode |
+| `staging` | RastasperiQ TEST | `za.co.rastasperiq.ordering.test` | TEST database, staging.rastasperiq.co.za, Yoco test mode |
 
-Every `flutter run` / `flutter build` needs `--flavor live` or `--flavor test`.
+Every `flutter run` / `flutter build` needs `--flavor live` or `--flavor staging` (Android refuses flavour names that start with "test").
 
 ## Run locally
 
@@ -20,7 +20,7 @@ Every `flutter run` / `flutter build` needs `--flavor live` or `--flavor test`.
 
 ```bash
 flutter pub get
-flutter run --flavor test --dart-define-from-file=release-config.test.json
+flutter run --flavor staging --dart-define-from-file=release-config.test.json
 ```
 
 ## Quality gates
@@ -36,7 +36,7 @@ flutter test
 One-time setup:
 
 1. Copy `release-config.test.example.json` to `release-config.test.json` (ignored by git) and fill in the TEST Supabase URL and publishable key.
-2. In the Firebase console (project `rastas-peri-q`) add an Android app with package `za.co.rastasperiq.ordering.test`, download its `google-services.json` and save it as `android/app/src/test/google-services.json`.
+2. In the Firebase console (project `rastas-peri-q`) add an Android app with package `za.co.rastasperiq.ordering.test`, download its `google-services.json` and save it as `android/app/src/staging/google-services.json`.
 
 Then:
 
@@ -52,7 +52,7 @@ Output: `release/android/rastasperiq-TEST-v<version>-build<code>.apk`. The scrip
 .\tool\build_android_release.ps1 -Environment live -Target all
 ```
 
-Needs the ignored `release-config.json` and `android/key.properties`. Output names are unchanged: `release/android/rastasperiq-v<version>-build<code>-closed-test-release.{apk,aab}`.
+Needs the ignored `release-config.json` and `android/key.properties`. The script refuses to build if the config is not the LIVE database. Output names are unchanged: `release/android/rastasperiq-v<version>-build<code>-closed-test-release.{apk,aab}`.
 
 Read `docs/ANDROID_SIGNING_GUIDE.md`, `docs/FINAL_RELEASE_REPORT.md` and `docs/GOOGLE_PLAY_RELEASE_CHECKLIST.md`. Apply `supabase/schema.sql` to staging/production before testing order placement. Never use a service-role key in the app.
 

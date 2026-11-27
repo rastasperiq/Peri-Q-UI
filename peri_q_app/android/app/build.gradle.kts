@@ -48,20 +48,23 @@ android {
         versionName = flutter.versionName
     }
 
-    // live: the Play Store app. test: a separate "RastasperiQ TEST" app that
+    // live: the Play Store app. staging: a separate "RastasperiQ TEST" app that
     // installs beside it and is built against the TEST database and staging
     // site (tool/build_android_release.ps1 -Environment test). Its Firebase
-    // file is src/test/google-services.json.
+    // file is src/staging/google-services.json. Android refuses flavour names
+    // that start with "test".
     flavorDimensions += "environment"
     productFlavors {
         create("live") {
             dimension = "environment"
             manifestPlaceholders["appLabel"] = "RastasperiQ"
+            manifestPlaceholders["authScheme"] = "rastasperiq"
         }
-        create("test") {
+        create("staging") {
             dimension = "environment"
             applicationIdSuffix = ".test"
             manifestPlaceholders["appLabel"] = "RastasperiQ TEST"
+            manifestPlaceholders["authScheme"] = "rastasperiq-test"
             // Without the release key a TEST build is debug-signed so it can
             // still be installed on a test phone. Live builds never are.
             signingConfig = signingConfigs.getByName("debug")

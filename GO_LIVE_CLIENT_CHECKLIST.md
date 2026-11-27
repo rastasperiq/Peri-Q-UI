@@ -109,7 +109,7 @@ These complete the legal pages (draft PR #10) and the remaining stages. Each one
 
 ## 6. Android app
 
-- **Signed release APK:** version **1.0.6 (build 7)**, in `peri_q_app/release/android/`.
+- **Next release:** version **1.0.7 (build 8)**, not built yet. Do not upload 1.0.6 (build 7): it was made for the old database. Play Production still has 1.0.5 (build 6).
 - **Contents:** everything live on the website (consent tick boxes, the full order review, the updated deletion wording and the legal links).
-- **Play Console:** the APK isn't uploaded yet. If the upload is an app bundle (`.aab`), build it with `peri_q_app/tool/build_android_release.ps1 -Target appbundle`.
+- **Play Console:** upload the app bundle (`.aab`), built with `peri_q_app/tool/build_android_release.ps1 -Environment live -Target appbundle`.
 - **Yoco keys:** the app holds none. Switching to live keys needs **no** new app build.

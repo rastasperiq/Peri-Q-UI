@@ -62,7 +62,10 @@ writes data. If any disagrees, the payment and delivery-quote routes answer
    website and the app can only read it.
 
 Payment keys are checked too: TEST refuses `sk_live_` keys. LIVE refuses
-`sk_test_` keys once `YOCO_REQUIRE_LIVE_KEYS=true` is set at go-live.
+`sk_test_` keys unless `YOCO_ALLOW_TEST_KEYS_UNTIL=YYYY-MM-DD` is set to a date
+at most 60 days ahead (for the period before go-live); after that date payments
+stop until live keys are set. An unmarked database is refused in both
+environments, and an unmarked database refuses live-mode payment rows.
 
 Inside the database, triggers on `orders`, `checkout_intents`, `payments` and
 `payment_refunds` refuse live-mode payment rows in a TEST database, and
@@ -88,7 +91,7 @@ setting a user could change.
 | `YOCO_WEBHOOK_SECRET` | secret of the LIVE webhook | secret of the TEST webhook |
 | `GOOGLE_ROUTES_API_KEY` | production key | separate restricted key |
 | `TEST_SUPABASE_PROJECT_REF` | not set | TEST project ref |
-| `YOCO_REQUIRE_LIVE_KEYS` | `true` after go-live | not set |
+| `YOCO_ALLOW_TEST_KEYS_UNTIL` | `YYYY-MM-DD` before go-live only; remove at go-live | not set |
 
 **App build (`--dart-define-from-file`):** `APP_ENVIRONMENT`, `SUPABASE_URL`,
 `SUPABASE_PUBLISHABLE_KEY`, `CARD_CHECKOUT_URL`, `DELIVERY_QUOTE_URL`,
@@ -96,7 +99,12 @@ setting a user could change.
 Real files (`release-config*.json`) are git-ignored.
 
 **Database tool (your terminal only, never saved):** `PERIQ_TEST_DB_URL`,
-`PERIQ_LIVE_DB_URL`, `PERIQ_TEST_DEMO_PASSWORD`, optional `PERIQ_DB_CA_FILE`.
+`PERIQ_LIVE_DB_URL`, `PERIQ_TEST_DEMO_PASSWORD`, and **required** `PERIQ_DB_CA_FILE`:
+the path to the Supabase CA certificate (Supabase → Project Settings → Database →
+SSL Configuration → Download certificate). The tool verifies the server
+certificate and hostname on every connection and refuses to connect without the
+CA, or if the URL contains its own `sslmode`/`ssl` options. Never work around a
+certificate error by disabling verification.
 
 **Edge function secrets (Supabase, per project):** `FCM_PROJECT_ID`,
 `FCM_CLIENT_EMAIL`, `FCM_PRIVATE_KEY`. TEST has none until push notifications
@@ -123,9 +131,8 @@ are needed there.
   to `website/.env.local`, keep `APP_ENVIRONMENT=test`, and fill in TEST values
   only. If a LIVE URL ends up there, the website refuses payments and writes.
 - **App:** build with `release-config.json` for LIVE and
-  `release-config.test.json` for TEST. Both builds currently share the
-  package name `za.co.rastasperiq.ordering`, so installing one replaces the
-  other on a phone (see "Outstanding" below).
+  `release-config.test.json` for TEST. They are separate apps (flavours `live`
+  and `staging`; the TEST package ends in `.test`), so both can be on one phone.
 - **Database tool:** set only the URL you need, in a fresh terminal, and close
   the terminal when done:
 
@@ -175,7 +182,7 @@ Its safety rules (unit-tested in `guard.test.mjs`, run with `node --test guard.t
    URL `https://staging.rastasperiq.co.za`; redirect URLs
    `https://staging.rastasperiq.co.za/auth/callback/`,
    `https://staging.rastasperiq.co.za/auth/callback/?recovery=1`,
-   `http://localhost:3000/auth/callback/`, `rastasperiq://reset-password`.
+   `http://localhost:3000/auth/callback/`, `rastasperiq-test://reset-password`.
 3. **Schema and marker:** set `PERIQ_TEST_DB_URL` (Supabase → Connect →
    Session pooler) and run `node db.mjs init-test`. It refuses any project
    that already has tables.
@@ -212,8 +219,8 @@ Its safety rules (unit-tested in `guard.test.mjs`, run with `node --test guard.t
 `20261118120000_environment_guard.sql` to LIVE as above (the tool allows this
 one step before LIVE has a marker), then run
 `mark-live --confirm-live ovqvytkhznhmlxsfaqwh --allow-test-payments true`.
-At go-live, run `mark-live … --allow-test-payments false` and set
-`YOCO_REQUIRE_LIVE_KEYS=true` on the LIVE Vercel project.
+At go-live, run `mark-live … --allow-test-payments false`, set the live
+Yoco keys and remove `YOCO_ALLOW_TEST_KEYS_UNTIL` from the LIVE Vercel project.
 
 ## 9. Deploying approved code changes
 
@@ -260,9 +267,6 @@ At go-live, run `mark-live … --allow-test-payments false` and set
 
 ## Outstanding
 
-- TEST app builds share the LIVE package name, so they replace the LIVE app
-  on a phone. Add an Android product flavour with an `applicationIdSuffix`
-  (for example `.test`) before giving TEST builds to anyone else.
 - Push notifications in TEST need their own Firebase credentials on the TEST
   Supabase project.
 - Website unit tests must run with `NODE_OPTIONS=--no-experimental-webstorage`

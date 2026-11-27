@@ -1,13 +1,19 @@
 import { NextResponse } from "next/server";
 import { createServiceClient, readServerSupabaseConfig } from "@/lib/supabase";
 import { getSiteUrl, readYocoEnv } from "@/lib/yoco";
-import { allowRequest, CHECKOUT_LIMITS, clientIp, ipBucket } from "@/lib/rate-limit";
+import { checkRateLimit, CHECKOUT_LIMITS, clientIp, ipBucket, type LimitResult } from "@/lib/rate-limit";
 import { checkEnvironment, environmentBlock } from "@/lib/environment-guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function rateLimited(retryAfterSeconds: number) {
+function rateLimited(result: Exclude<LimitResult, "allowed">, retryAfterSeconds: number) {
+  if (result === "unavailable") {
+    return NextResponse.json(
+      { error: "Payments are briefly unavailable. Please try again in a minute. Your cart is saved.", code: "limiter_unavailable" },
+      { status: 503, headers: { "Retry-After": "30" } },
+    );
+  }
   return NextResponse.json(
     { error: "Too many payment attempts. Please wait a few minutes and try again. Your cart is saved.", code: "rate_limited" },
     { status: 429, headers: { "Retry-After": String(retryAfterSeconds) } },
@@ -81,16 +87,14 @@ export async function POST(req: Request) {
   try {
     const svc = createServiceClient();
     const ip = clientIp(req);
-    if (ip && !(await allowRequest(svc, { bucket: ipBucket("checkout", ip, supaCfg.serviceRoleKey), ...CHECKOUT_LIMITS.perIp }))) {
-      return rateLimited(CHECKOUT_LIMITS.perIp.windowSeconds);
-    }
+    const ipLimit = ip ? await checkRateLimit(svc, { bucket: ipBucket("checkout", ip, supaCfg.serviceRoleKey), ...CHECKOUT_LIMITS.perIp }) : "allowed";
+    if (ipLimit !== "allowed") return rateLimited(ipLimit, CHECKOUT_LIMITS.perIp.windowSeconds);
     const { data: auth, error: authError } = await svc.auth.getUser(token);
     if (authError || !auth.user) {
       return NextResponse.json({ error: "Your session has expired. Please try again.", code: "unauthorized" }, { status: 401 });
     }
-    if (!(await allowRequest(svc, { bucket: `checkout:user:${auth.user.id}`, ...CHECKOUT_LIMITS.perUser }))) {
-      return rateLimited(CHECKOUT_LIMITS.perUser.windowSeconds);
-    }
+    const userLimit = await checkRateLimit(svc, { bucket: `checkout:user:${auth.user.id}`, ...CHECKOUT_LIMITS.perUser });
+    if (userLimit !== "allowed") return rateLimited(userLimit, CHECKOUT_LIMITS.perUser.windowSeconds);
     const { data, error } = await svc.from("checkout_intents").select("id,order_number,redirect_url,user_id,total_price,payment_method,payment_status,paid_at,yoco_checkout_id,yoco_mode,client_request_id,created_at").eq("id", orderId.trim()).maybeSingle();
     if (error) throw error;
     order = (data as Record<string, unknown> | null) ?? null;
@@ -130,6 +134,13 @@ export async function POST(req: Request) {
     const createdAt = Date.parse(String(order.created_at ?? ""));
     if (!Number.isFinite(createdAt) || Date.now() - createdAt >= 23 * 60 * 60 * 1000) {
       return NextResponse.json({ error: "This checkout needs a payment check. Contact the restaurant before paying again.", code: "checkout_expired" }, { status: 409 });
+    }
+    // The customer must have accepted the current terms for this exact draft,
+    // whichever client created it (audit SA-008). Unknown answers fail closed.
+    const { data: accepted, error: acceptanceError } = await svc.rpc("checkout_policy_accepted", { p_user_id: auth.user.id, p_checkout_id: order.id });
+    if (acceptanceError) throw acceptanceError;
+    if (accepted !== true) {
+      return NextResponse.json({ error: "Please accept our terms at checkout before paying. Your cart is saved.", code: "terms_not_accepted" }, { status: 409 });
     }
 
     const siteUrl = getSiteUrl();
