@@ -6,7 +6,8 @@
 // browser:
 //   APP_ENVIRONMENT            'test' | 'live' (Vercel / .env.local)
 //   SUPABASE_URL / NEXT_PUBLIC_SUPABASE_URL   must point at that environment's project
-//   YOCO_SECRET_KEY            sk_test_ in TEST; sk_live_ in LIVE once go-live
+//   YOCO_SECRET_KEY            sk_test_ in TEST; sk_live_ in LIVE
+//   YOCO_ALLOW_TEST_KEYS_UNTIL LIVE only, before go-live: YYYY-MM-DD, at most 60 days ahead
 //   app_environment row        the database's own marker (see migration 20261118120000)
 
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -58,7 +59,7 @@ function paymentModeFromKey(key: string | undefined): "test" | "live" | null {
  * previews, unknown projects) is TEST. Local development therefore defaults
  * to TEST, and TEST is refused the production database below.
  */
-export function readEnvironmentConfig(env: Env = process.env): EnvironmentConfig {
+export function readEnvironmentConfig(env: Env = process.env, now: Date = new Date()): EnvironmentConfig {
   const issues: EnvironmentIssue[] = [];
   const serverRef = projectRefFromSupabaseUrl(env.SUPABASE_URL ?? env.NEXT_PUBLIC_SUPABASE_URL);
   const publicRef = projectRefFromSupabaseUrl(env.NEXT_PUBLIC_SUPABASE_URL);
@@ -99,16 +100,28 @@ export function readEnvironmentConfig(env: Env = process.env): EnvironmentConfig
     issues.push({ level: "block", message: "TEST refuses live Yoco keys." });
   }
   if (environment === "live" && paymentMode === "test") {
-    const required = (env.YOCO_REQUIRE_LIVE_KEYS ?? "").trim().toLowerCase() === "true";
-    issues.push({
-      level: required ? "block" : "warn",
-      message: required
-        ? "LIVE refuses Yoco test keys (YOCO_REQUIRE_LIVE_KEYS=true)."
-        : "LIVE is still using Yoco test keys (before go-live).",
-    });
+    // Test keys on LIVE only under an explicit, dated exception (audit SA-012).
+    const until = testKeyExceptionEnd(env.YOCO_ALLOW_TEST_KEYS_UNTIL, now);
+    issues.push(
+      until
+        ? { level: "warn", message: `LIVE is using Yoco test keys until ${until} (before go-live).` }
+        : { level: "block", message: "LIVE refuses Yoco test keys. Set live keys, or YOCO_ALLOW_TEST_KEYS_UNTIL=YYYY-MM-DD (at most 60 days ahead) before go-live." },
+    );
   }
 
   return { environment, inferred, projectRef, paymentMode, issues };
+}
+
+const MAX_TEST_KEY_EXCEPTION_DAYS = 60;
+
+/** The exception's last day (YYYY-MM-DD) while it is valid and current, else null. */
+function testKeyExceptionEnd(value: string | undefined, now: Date): string | null {
+  const day = (value ?? "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+  const end = Date.parse(`${day}T23:59:59Z`);
+  if (!Number.isFinite(end) || new Date(end).toISOString().slice(0, 10) !== day) return null;
+  const remaining = end - now.getTime();
+  return remaining >= 0 && remaining <= (MAX_TEST_KEY_EXCEPTION_DAYS + 1) * 86_400_000 ? day : null;
 }
 
 /** Environment for display (banner, metadata). Synchronous, no database call. */
@@ -141,12 +154,10 @@ export function combineWithMarker(
   }
   if (database.status === "connected") {
     if (!marker?.environment) {
+      // Unmarked databases are refused in both environments (audit SA-012).
       issues.push({
-        level: config.environment === "test" ? "block" : "warn",
-        message:
-          config.environment === "test"
-            ? "The TEST database is not marked as TEST."
-            : "The LIVE database is not marked as LIVE yet.",
+        level: "block",
+        message: `The ${config.environment.toUpperCase()} database is not marked as ${config.environment.toUpperCase()}.`,
       });
     } else if (marker.environment !== config.environment) {
       issues.push({

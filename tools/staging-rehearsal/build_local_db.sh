@@ -69,4 +69,12 @@ echo "== stage 3 migration (account data and retention) =="
 psql $PSQL_ARGS -d "$DB" -q -v ON_ERROR_STOP=1 \
   -f "$REPO_ROOT/peri_q_app/supabase/migrations/20261103210000_account_data_retention.sql"
 
+for migration in 20261117120000_distance_delivery_pricing 20261118120000_environment_guard \
+                 20261127120000_security_audit_remediation; do
+  echo "== $migration =="
+  # shellcheck disable=SC2086
+  psql $PSQL_ARGS -d "$DB" -q -v ON_ERROR_STOP=1 \
+    -f "$REPO_ROOT/peri_q_app/supabase/migrations/$migration.sql"
+done
+
 echo "ready: REHEARSAL_DSN='host=... dbname=$DB' python3 rehearsal_test.py"

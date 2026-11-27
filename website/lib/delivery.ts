@@ -23,6 +23,7 @@ export type DeliveryQuoteError = {
     | "bad_request"
     | "unauthorized"
     | "rate_limited"
+    | "limiter_unavailable"
     | "delivery_unavailable"
     | "address_not_found"
     | "out_of_range"

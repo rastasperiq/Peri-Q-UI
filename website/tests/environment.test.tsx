@@ -84,14 +84,21 @@ describe("environment configuration", () => {
     expect(config.issues).toEqual([]);
   });
 
-  it("LIVE warns about test keys until YOCO_REQUIRE_LIVE_KEYS is switched on", () => {
+  it("LIVE refuses test keys unless a dated exception is current (SA-012)", () => {
     const base = { APP_ENVIRONMENT: "live", NEXT_PUBLIC_SUPABASE_URL: liveUrl, YOCO_SECRET_KEY: "sk_test_x" };
-    expect(blocking(base)).toEqual([]);
-    expect(readEnvironmentConfig(base).issues[0]?.level).toBe("warn");
-    expect(blocking({ ...base, YOCO_REQUIRE_LIVE_KEYS: "true" })).toContain(
-      "LIVE refuses Yoco test keys (YOCO_REQUIRE_LIVE_KEYS=true).",
-    );
-    expect(blocking({ ...base, YOCO_SECRET_KEY: "sk_live_x", YOCO_REQUIRE_LIVE_KEYS: "true" })).toEqual([]);
+    const now = new Date("2026-11-27T10:00:00Z");
+    const blocks = (env: Record<string, string>) =>
+      readEnvironmentConfig(env, now).issues.filter((i) => i.level === "block").length > 0;
+    expect(blocks(base)).toBe(true);
+    expect(blocks({ ...base, YOCO_ALLOW_TEST_KEYS_UNTIL: "2026-12-31" })).toBe(false);
+    expect(readEnvironmentConfig({ ...base, YOCO_ALLOW_TEST_KEYS_UNTIL: "2026-12-31" }, now).issues[0]).toEqual({
+      level: "warn", message: "LIVE is using Yoco test keys until 2026-12-31 (before go-live).",
+    });
+    expect(blocks({ ...base, YOCO_ALLOW_TEST_KEYS_UNTIL: "2026-11-27" })).toBe(false); // the last day still counts
+    for (const until of ["2026-11-26", "2027-06-01", "2026-02-30", "true", "soon"]) {
+      expect(blocks({ ...base, YOCO_ALLOW_TEST_KEYS_UNTIL: until })).toBe(true);
+    }
+    expect(blocks({ ...base, YOCO_SECRET_KEY: "sk_live_x" })).toBe(false);
   });
 
   it("an invalid APP_ENVIRONMENT blocks", () => {
@@ -115,11 +122,11 @@ describe("database marker", () => {
     expect(combineWithMarker(liveConfig, connected("test", LIVE_SUPABASE_PROJECT_REF)).ok).toBe(false);
   });
 
-  it("an unmarked TEST database blocks; an unmarked LIVE database only warns", () => {
+  it("an unmarked database blocks in TEST and in LIVE (SA-012)", () => {
     expect(combineWithMarker(testConfig, connected(null, null)).ok).toBe(false);
     const live = combineWithMarker(liveConfig, connected(null, null));
-    expect(live.ok).toBe(true);
-    expect(live.issues.map((i) => i.message)).toContain("The LIVE database is not marked as LIVE yet.");
+    expect(live.ok).toBe(false);
+    expect(live.issues.map((i) => i.message)).toContain("The LIVE database is not marked as LIVE.");
   });
 
   it("blocks a marker from another project and an unreachable database", () => {
@@ -160,7 +167,7 @@ describe("verifyEnvironment", () => {
     vi.stubEnv("SUPABASE_URL", liveUrl);
     const status = await verifyEnvironment(() => clientReturning({ data: null, error: { code: "PGRST205" } }));
     expect(status.database.status).toBe("connected");
-    expect(status.ok).toBe(true);
+    expect(status.ok).toBe(false);
   });
 });
 

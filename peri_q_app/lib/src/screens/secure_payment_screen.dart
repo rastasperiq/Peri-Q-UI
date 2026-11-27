@@ -91,8 +91,9 @@ class _SecurePaymentScreenState extends State<SecurePaymentScreen> {
       _close();
       return NavigationDecision.prevent;
     }
-    // App links and intents cannot open inside this page.
-    if (uri.scheme != 'https' && uri.scheme != 'http') {
+    // App links, intents and unencrypted pages cannot open inside this page
+    // (audit SA-014).
+    if (!CardPaymentSession.isSecurePage(uri)) {
       return NavigationDecision.prevent;
     }
     return NavigationDecision.navigate;

@@ -165,4 +165,16 @@ describe("POST /api/delivery/quote", () => {
     const limited = await POST(request("12 Test Street, Bloemfontein"));
     expect(limited.status).toBe(429);
   });
+
+  it("never calls Google when the limiter cannot be checked (SA-003)", async () => {
+    for (const reply of [{ data: null, error: { message: "timeout" } }, { data: null, error: null }]) {
+      db.calls = [];
+      db.rpc.consume_rate_limit = [reply];
+      const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
+      const res = await POST(request("12 Test Street, Bloemfontein"));
+      expect(res.status).toBe(503);
+      expect(await res.json()).toMatchObject({ code: "limiter_unavailable" });
+      expect(fetchMock).not.toHaveBeenCalled();
+    }
+  });
 });

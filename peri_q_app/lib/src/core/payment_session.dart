@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'payment_config.dart';
+
 /// Shows the secure payment page for [orderId] inside the app. Returns false
 /// when it cannot, so the caller can fall back to a browser.
 typedef PaymentPagePresenter =
@@ -113,7 +115,7 @@ class CardPaymentSession {
   Future<bool> openPaymentPage() async {
     final url = _checkoutUrl;
     final orderId = _activeOrderId;
-    if (url == null || orderId == null) return false;
+    if (url == null || orderId == null || !isSecurePage(url)) return false;
     final present = presenter;
     if (present != null) {
       try {
@@ -132,11 +134,31 @@ class CardPaymentSession {
     return launchUrl(url, mode: LaunchMode.externalApplication);
   }
 
+  /// Pages the payment screen may show: HTTPS only, no embedded credentials
+  /// (audit SA-014). Card issuers' 3-D Secure pages live on their own hosts,
+  /// so the host itself is not limited.
+  static bool isSecurePage(Uri uri) =>
+      uri.scheme == 'https' && uri.host.isNotEmpty && uri.userInfo.isEmpty;
+
+  /// The website that issued this payment, which is where the provider sends
+  /// the customer back to.
+  static String? get siteHost => cardCheckoutUri()?.host;
+
   /// Reads where the payment provider sends the customer when they finish:
   /// `https://<site>/payment/<orderId>/?checkout=<success|cancel|failure>`.
-  /// Returns null for any other page, including returns for other orders.
-  static PaymentReturn? parseHostedReturn(Uri uri, {required String orderId}) {
-    if (uri.scheme != 'https') return null;
+  /// Returns null for any other page, including returns for other orders and
+  /// look-alike paths on other hosts.
+  static PaymentReturn? parseHostedReturn(
+    Uri uri, {
+    required String orderId,
+    String? site,
+  }) {
+    final expectedHost = site ?? siteHost;
+    if (!isSecurePage(uri) ||
+        expectedHost == null ||
+        uri.host.toLowerCase() != expectedHost.toLowerCase()) {
+      return null;
+    }
     final segments = uri.pathSegments.where((s) => s.isNotEmpty).toList();
     if (segments.length != 2 ||
         segments[0] != 'payment' ||

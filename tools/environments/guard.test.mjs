@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { LIVE_PROJECT_REF, assertCommandAllowed, checkTarget, projectRefFromDbUrl } from "./guard.mjs";
+import { LIVE_PROJECT_REF, assertCommandAllowed, assertNoTlsOverride, checkTarget, projectRefFromDbUrl, tlsOptions } from "./guard.mjs";
 
 const TEST_REF = "abcdefghijklmnopqrst";
 
@@ -53,4 +53,21 @@ test("destructive commands are TEST-only", () => {
 
 test("an unknown environment is refused", () => {
   assert.throws(() => checkTarget({ env: "prod", ref: TEST_REF, marker: "test" }), /Choose an environment/);
+});
+
+test("TLS always verifies the server certificate and has no unverified fallback (SA-001)", () => {
+  const ca = ["-----BEGIN CERTIFICATE-----", "MIIB", "-----END CERTIFICATE-----", ""].join("\n");
+  assert.deepEqual(tlsOptions(ca), { ca, rejectUnauthorized: true });
+  for (const missing of [null, undefined, "", "not a certificate"]) {
+    assert.throws(() => tlsOptions(missing), /PERIQ_DB_CA_FILE/);
+  }
+});
+
+test("connection URLs cannot carry their own TLS settings (SA-001)", () => {
+  const base = `postgresql://postgres.${TEST_REF}:x@aws-0-eu-west-1.pooler.supabase.com:6543/postgres`;
+  assert.doesNotThrow(() => assertNoTlsOverride(base));
+  assert.doesNotThrow(() => assertNoTlsOverride(`${base}?application_name=x`));
+  for (const query of ["sslmode=no-verify", "sslmode=disable", "ssl=false", "SSLMODE=require", "sslrootcert=/tmp/x.pem", "uselibpqcompat=true"]) {
+    assert.throws(() => assertNoTlsOverride(`${base}?${query}`), /TLS is configured by PERIQ_DB_CA_FILE only/, query);
+  }
 });

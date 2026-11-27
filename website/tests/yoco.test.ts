@@ -25,7 +25,8 @@ vi.mock("@/lib/supabase", () => ({
       db.calls.push({table:name,method:"rpc",args:[args]});
       const queued = db.rpcResults[name]?.shift();
       if (queued) return queued;
-      return name === "consume_rate_limit" ? { data: true, error: null } : { data: { status: "processed", order_id: "order-1" }, error: null };
+      if (name === "consume_rate_limit" || name === "checkout_policy_accepted") return { data: true, error: null };
+      return { data: { status: "processed", order_id: "order-1" }, error: null };
     },
     from: (table: string) => {
       const chain: Record<string, unknown> = {};
@@ -200,6 +201,26 @@ describe("Safe checkout initiation and retries", () => {
     expect(body).not.toContain("YOCO_SECRET_KEY");
     expect(body).not.toContain("Yoco");
   });
+  it("never opens a payment without this customer's acceptance of the current terms (SA-008)", async () => {
+    for (const reply of [ok(false), ok(null)]) {
+      db.calls = [];
+      db.results = [ok(draft())];
+      db.rpcResults.checkout_policy_accepted = [reply];
+      const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
+      const response = await checkout(request());
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({ code: "terms_not_accepted" });
+      expect(db.calls.find(c => c.table === "checkout_policy_accepted")!.args[0]).toEqual({ p_user_id: "user-a", p_checkout_id: "order-1" });
+      expect(fetchMock).not.toHaveBeenCalled();
+    }
+  });
+  it("fails closed when the acceptance check itself fails", async () => {
+    db.results = [ok(draft())];
+    db.rpcResults.checkout_policy_accepted = [{ data: null, error: { message: "function missing" } }];
+    const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
+    expect((await checkout(request())).status).toBe(503);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
   it("audits verified failed payments without creating kitchen orders", async () => {
     db.results = [ok(), ok(order), ok(), ok()];
     expect((await webhook(signedRequest({ ...event, type: "payment.failed" }))).status).toBe(200);
@@ -337,10 +358,16 @@ describe("Checkout rate limiting", () => {
     expect((limitCalls()[1].args[0] as { p_bucket: string; p_limit: number }).p_bucket).toBe("checkout:user:user-a");
     expect(fetchMock).not.toHaveBeenCalled();
   });
-  it("allows checkout when the limiter is unavailable", async () => {
-    db.rpcResults.consume_rate_limit = [{ data: null, error: { message: "function missing" } } as Result, { data: null, error: { message: "function missing" } }];
-    db.results = [ok({ ...order, created_at: new Date().toISOString(), client_request_id: "request-1" }), ok()];
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: "ch-1", redirectUrl: "https://c.yoco.com/checkout/one", processingMode: "test" }))));
-    expect((await checkout(request())).status).toBe(200);
+  it("refuses to start a paid checkout when the limiter cannot be checked (SA-003)", async () => {
+    for (const reply of [{ data: null, error: { message: "function missing" } } as Result, ok(null), ok("yes")]) {
+      db.calls = [];
+      db.rpcResults.consume_rate_limit = [reply];
+      const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
+      const response = await checkout(request());
+      expect(response.status).toBe(503);
+      expect(response.headers.get("Retry-After")).toBe("30");
+      expect(await response.json()).toMatchObject({ code: "limiter_unavailable" });
+      expect(fetchMock).not.toHaveBeenCalled();
+    }
   });
 });

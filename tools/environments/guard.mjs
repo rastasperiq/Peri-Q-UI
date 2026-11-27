@@ -74,3 +74,32 @@ export function assertCommandAllowed(command, env) {
     throw new Error(`\`${command}\` only runs against TEST.`);
   }
 }
+
+// Connection-string options that would let node-postgres replace or weaken the
+// TLS settings we pass (parsed URL options override the ssl object).
+const TLS_URL_PARAMS = new Set(["ssl", "sslmode", "sslrootcert", "sslcert", "sslkey", "sslpassword", "uselibpqcompat"]);
+
+/** Refuses connection URLs that carry their own TLS settings. */
+export function assertNoTlsOverride(dbUrl) {
+  const url = new URL(dbUrl);
+  for (const key of url.searchParams.keys()) {
+    if (TLS_URL_PARAMS.has(key.toLowerCase())) {
+      throw new Error(`Remove "${key}" from the connection URL: TLS is configured by PERIQ_DB_CA_FILE only.`);
+    }
+  }
+}
+
+/**
+ * TLS options for a privileged database connection. The server certificate is
+ * always verified against the provider CA, including its hostname; there is no
+ * unverified fallback, so a missing or unreadable CA stops before connecting.
+ */
+export function tlsOptions(caPem) {
+  if (typeof caPem !== "string" || !caPem.includes("-----BEGIN CERTIFICATE-----")) {
+    throw new Error(
+      "Set PERIQ_DB_CA_FILE to the Supabase CA certificate (Database settings → SSL) before connecting. " +
+        "Unverified TLS is not allowed.",
+    );
+  }
+  return { ca: caPem, rejectUnauthorized: true };
+}

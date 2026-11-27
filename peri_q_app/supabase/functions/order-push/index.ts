@@ -1,5 +1,6 @@
-import { createClient } from "npm:@supabase/supabase-js@2";
-import { decodeJwt, importPKCS8, SignJWT } from "npm:jose@6";
+// Exact versions (audit SA-016): upgrade deliberately, then redeploy.
+import { createClient } from "npm:@supabase/supabase-js@2.110.9";
+import { decodeJwt, importPKCS8, SignJWT } from "npm:jose@6.2.17";
 
 type PushEvent = "new_order" | "status_update";
 

@@ -15,7 +15,7 @@ export default function CallbackClient() {
     }
     void request.current.then((recovery) => {
       if (active) window.location.replace(recovery ? "/account/?mode=password" : "/account/");
-    }).catch(() => { if (active) setError("This link is invalid or has expired. Return to sign in and request a new link."); });
+    }).catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : "This link is invalid or has expired. Return to sign in and request a new link."); });
     return () => { active = false; };
   }, []);
   return <main id="main-content" className="site-shell py-16">
